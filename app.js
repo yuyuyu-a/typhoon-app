@@ -1,0 +1,1011 @@
+/* 台风实况 - 前端逻辑 */
+"use strict";
+
+// ===== 强度配置 =====
+const INTENSITY = {
+  TD: { name: { zh: "热带低压", en: "Tropical Depression", ja: "熱帯低気圧" }, color: "#5dade2" },
+  TS: { name: { zh: "热带风暴", en: "Tropical Storm", ja: "熱帯低気圧" }, color: "#2ecc71" },
+  STS: { name: { zh: "强热带风暴", en: "Severe Tropical Storm", ja: "台風" }, color: "#f1c40f" },
+  TY: { name: { zh: "台风", en: "Typhoon", ja: "台風" }, color: "#e67e22" },
+  STY: { name: { zh: "强台风", en: "Severe Typhoon", ja: "強い台風" }, color: "#e74c3c" },
+  SuperTY: { name: { zh: "超强台风", en: "Super Typhoon", ja: "非常に強い台風" }, color: "#9b59b6" },
+};
+
+// 风速(m/s) → 等级码 (预报点可能没有 grade 字段时用)
+function windToGrade(w) {
+  if (w == null) return "TD";
+  if (w < 17.2) return "TD";
+  if (w < 24.4) return "TS";
+  if (w < 32.7) return "STS";
+  if (w < 41.5) return "TY";
+  if (w < 51.0) return "STY";
+  return "SuperTY";
+}
+function gradeOf(point) {
+  return INTENSITY[point.grade] ? point.grade : windToGrade(point.wind);
+}
+function gradeInfo(g) {
+  const info = INTENSITY[g] || INTENSITY.TD;
+  const lang = state.lang || "zh";
+  return { name: info.name[lang] || info.name.zh, color: info.color };
+}
+
+// 风圈 tier: knot 标签 → {tier, color}
+const WIND_TIER = {
+  "30KTS": { tier: 7, color: "#5dade2", fill: "rgba(93,173,226,0.13)" },
+  "50KTS": { tier: 10, color: "#f1c40f", fill: "rgba(241,196,15,0.16)" },
+  "64KTS": { tier: 12, color: "#e74c3c", fill: "rgba(231,76,60,0.20)" },
+};
+
+// 预报机构代号 → 中文名
+const AGENCY_CN = {
+  BABJ: "中央气象台",
+  RJTD: "日本气象厅",
+  PGTW: "美国联合台风警报中心",
+};
+function agencyCn(code) { return AGENCY_CN[code] || code; }
+
+// ===== 多语言 (i18n) =====
+const I18N = {
+  zh: {
+    _label: "中文",
+    title: "台风实况",
+    subtitle: "实时路径 · 预报 · 风圈 · 历史",
+    dataSource: "数据来源：中央气象台 typhoon.nmc.cn",
+    updated: "更新于",
+    autoRefresh: "自动刷新",
+    refresh: "刷新",
+    themeTip: "切换白天/夜晚模式",
+    loading: "加载中…",
+    loadFailed: "加载失败, 请检查网络",
+    noRecord: "该年无台风记录",
+    countSuffix: "个台风",
+    live: "活跃",
+    stopped: "已停",
+    stopped2: "已停止",
+    yearSuffix: " 年",
+    legendTitle: "强度等级",
+    windTitle: "风圈",
+    wind7: "7级",
+    wind10: "10级",
+    wind12: "12级",
+    typhoonNo: "号",
+    currentPos: "当前位置",
+    forecastBy: "预报",
+    hours: "小时",
+    baseTime: "基报时",
+    level: "等级",
+    position: "中心位置",
+    pressure: "中心气压",
+    wind: "最大风速",
+    moveDir: "移动方向",
+    moveSpeed: "移动速度",
+    latestPos: "最新位置",
+    warningTitle: "台风预警",
+    warningBody: "当前为",
+    warningTail: "中心附近最大风力",
+    warningTip: "请相关海域注意防范。",
+    loadTip: "加载台风数据…",
+    mapAttr: "地图底图 © OpenStreetMap 贡献者 · 台风数据 © 中央气象台",
+    north: "北纬",
+    east: "东经",
+  },
+  en: {
+    _label: "English",
+    title: "Typhoon Live",
+    subtitle: "Track · Forecast · Wind Circle · History",
+    dataSource: "Source: CMA typhoon.nmc.cn",
+    updated: "Updated",
+    autoRefresh: "Auto-refresh",
+    refresh: "Refresh",
+    themeTip: "Toggle day/night theme",
+    loading: "Loading…",
+    loadFailed: "Load failed, please check network",
+    noRecord: "No typhoon records this year",
+    countSuffix: "typhoons",
+    live: "Active",
+    stopped: "Ended",
+    stopped2: "Stopped",
+    yearSuffix: "",
+    legendTitle: "Intensity Scale",
+    windTitle: "Wind Circle",
+    wind7: "Force 7",
+    wind10: "Force 10",
+    wind12: "Force 12",
+    typhoonNo: "No.",
+    currentPos: "Current Position",
+    forecastBy: "Forecast",
+    hours: "h",
+    baseTime: "Base Time",
+    level: "Level",
+    position: "Center Position",
+    pressure: "Central Pressure",
+    wind: "Max Wind",
+    moveDir: "Moving Direction",
+    moveSpeed: "Moving Speed",
+    latestPos: "Latest Position",
+    warningTitle: "Typhoon Warning",
+    warningBody: "Currently",
+    warningTail: "Max wind near center",
+    warningTip: "Relevant sea areas, please take precautions.",
+    loadTip: "Loading typhoon data…",
+    mapAttr: "Map © OpenStreetMap contributors · Typhoon data © CMA",
+    north: "N",
+    east: "E",
+  },
+  ja: {
+    _label: "日本語",
+    title: "台風実況",
+    subtitle: "進路・予報・風域・履歴",
+    dataSource: "データ元：中央気象台 typhoon.nmc.cn",
+    updated: "更新",
+    autoRefresh: "自動更新",
+    refresh: "更新",
+    themeTip: "昼/夜モード切替",
+    loading: "読み込み中…",
+    loadFailed: "読み込み失敗, ネットワークを確認してください",
+    noRecord: "該当年の台風記録なし",
+    countSuffix: "個の台風",
+    live: "活動中",
+    stopped: "終了",
+    stopped2: "終了",
+    yearSuffix: "年",
+    legendTitle: "強度階級",
+    windTitle: "風域",
+    wind7: "7級",
+    wind10: "10級",
+    wind12: "12級",
+    typhoonNo: "号",
+    currentPos: "現在位置",
+    forecastBy: "予報",
+    hours: "時間",
+    baseTime: "基準時刻",
+    level: "階級",
+    position: "中心位置",
+    pressure: "中心気圧",
+    wind: "最大風速",
+    moveDir: "進行方向",
+    moveSpeed: "進行速度",
+    latestPos: "最新位置",
+    warningTitle: "台風警報",
+    warningBody: "現在",
+    warningTail: "中心付近の最大風力",
+    warningTip: "該当海域は警戒してください。",
+    loadTip: "台風データを読み込み中…",
+    mapAttr: "地図 © OpenStreetMap 貢献者 · 台風データ © 中央気象台",
+    north: "北緯",
+    east: "東経",
+  },
+};
+const LANG_KEY = "typhoon-lang";
+function t(key) {
+  const lang = state.lang || "zh";
+  return (I18N[lang] && I18N[lang][key]) || I18N.zh[key] || key;
+}
+// 台风名按语言选字段: 中文用 name_cn, 英文/日文用 name_en (CMA 数据只有中英文名)
+function tyName(ty) {
+  const lang = state.lang || "zh";
+  return lang === "zh" ? (ty.name_cn || ty.name_en) : (ty.name_en || ty.name_cn);
+}
+function applyLang(lang) {
+  state.lang = lang;
+  document.documentElement.setAttribute("data-lang", lang);
+  const sel = document.getElementById("langSelect");
+  if (sel) sel.value = lang;
+}
+// 切换语言后全站重渲染
+function refreshLangUI() {
+  // 静态文本
+  document.title = t("title") + " · 实时追踪";
+  document.getElementById("hdrTitle").textContent = t("title");
+  document.getElementById("hdrSub").textContent = t("subtitle");
+  document.getElementById("hdrSrc").textContent = t("dataSource");
+  document.getElementById("lblAuto").textContent = t("autoRefresh");
+  el.btnRefresh.textContent = t("refresh");
+  document.getElementById("btnTheme").title = t("themeTip");
+  document.getElementById("loaderText").textContent = t("loadTip");
+  // 动态内容
+  fillYearSelect();
+  buildLegend();
+  switchBaseLayer();   // 切换底图地名语言
+  renderList();
+  el.updated.textContent = `${t("updated")} ${new Date().toLocaleTimeString("zh-CN")}`;
+  if (state.typhoons.length) {
+    el.hint.textContent = `${state.typhoons.length} ${t("countSuffix")}`;
+  }
+  // 重渲染当前台风详情 (弹窗/详情卡/预警)
+  if (state.currentTyphoon) {
+    state.fitOnRender = false;
+    renderTyphoon(state.currentTyphoon);
+  } else {
+    el.loader.hidden = true;
+  }
+}
+function initLang() {
+  let lang;
+  try { lang = localStorage.getItem(LANG_KEY); } catch (e) {}
+  if (!lang || !I18N[lang]) {
+    const nav = (navigator.language || "zh").toLowerCase();
+    if (nav.startsWith("ja")) lang = "ja";
+    else if (nav.startsWith("en")) lang = "en";
+    else lang = "zh";
+  }
+  applyLang(lang);
+}
+
+// 16 风向 → 中文
+const DIR_CN = {
+  N: "北", NNE: "北东北", NE: "东北", ENE: "东东北",
+  E: "东", ESE: "东东南", SE: "东南", SSE: "南东南",
+  S: "南", SSW: "南西南", SW: "西南", WSW: "西西南",
+  W: "西", WNW: "西西北", NW: "西北", NNW: "北西北",
+};
+function dirCn(d) { return DIR_CN[d] || d || "—"; }
+
+// 时间 "202607281200" → "2026-07-28 12:00"
+function fmtTime(s) {
+  if (!s || s.length < 12) return s || "—";
+  return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)} ${s.slice(8,10)}:${s.slice(10,12)}`;
+}
+
+// ===== 地理计算 =====
+function destination(lat, lon, bearingDeg, distKm) {
+  const R = 6371;
+  const d = distKm / R;
+  const lat1 = (lat * Math.PI) / 180;
+  const lon1 = (lon * Math.PI) / 180;
+  const brng = (bearingDeg * Math.PI) / 180;
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(brng)
+  );
+  const lon2 =
+    lon1 +
+    Math.atan2(
+      Math.sin(brng) * Math.sin(d) * Math.cos(lat1),
+      Math.cos(d) - Math.sin(lat1) * Math.sin(lat2)
+    );
+  return [(lat2 * 180) / Math.PI, (lon2 * 180) / Math.PI];
+}
+
+// 四象限风圈半径 → 平滑多边形顶点 (北=0°, 顺时针)
+function windCircleLatLngs(lat, lon, ne, se, sw, nw, steps = 72) {
+  // 象限中心: NE@45, SE@135, SW@225, NW@315；边界取相邻象限均值
+  const centers = [
+    [0, (nw + ne) / 2], [45, ne], [90, (ne + se) / 2],
+    [135, se], [180, (se + sw) / 2], [225, sw],
+    [270, (sw + nw) / 2], [315, nw], [360, (nw + ne) / 2],
+  ];
+  function rAt(theta) {
+    for (let i = 0; i < centers.length - 1; i++) {
+      if (theta >= centers[i][0] && theta <= centers[i + 1][0]) {
+        const t = (theta - centers[i][0]) / (centers[i + 1][0] - centers[i][0]);
+        return centers[i][1] + (centers[i + 1][1] - centers[i][1]) * t;
+      }
+    }
+    return 0;
+  }
+  const pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const theta = (i / steps) * 360;
+    const r = rAt(theta);
+    if (r > 0) pts.push(destination(lat, lon, theta, r));
+  }
+  return pts;
+}
+
+// 路径点边框/风圈空心色: 跟随主题 (深色主题用深底色, 浅色主题用浅底色)
+function bgStrokeColor() {
+  return document.documentElement.getAttribute("data-theme") === "light" ? "#ffffff" : "#0a0e14";
+}
+
+// ===== 地图初始化 =====
+const map = L.map("map", {
+  zoomControl: true,
+  attributionControl: true,
+  worldCopyJump: true,
+}).setView([20, 140], 4);
+
+// ===== 底图系统: OSM 标准底图 (中国区域中文地名) + 自建多语言地名标注层 =====
+// OSM 在中国区由本地贡献者用中文标注, 与之前预览效果一致; 通过 CSS 滤镜调暗适配深色主题
+// 自建三语地名标注层在 OSM 之上, 切语言时跟着切换
+let baseLayer = null;
+let labelLayer = null;
+
+function makeBaseLayer() {
+  const theme = document.documentElement.getAttribute("data-theme") || "dark";
+  const tileClass = theme === "light" ? "tiles-light" : "tiles-dark";
+  const layer = L.tileLayer(
+    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    {
+      attribution: "",
+      subdomains: "abc",
+      maxZoom: 18,
+      className: tileClass,
+    }
+  );
+  // 瓦片加载失败重试一次, 避免灰色占位块
+  layer.on("tileerror", (e) => {
+    const tile = e.tile;
+    if (tile && tile.dataset && !tile.dataset.retried) {
+      tile.dataset.retried = "1";
+      const src = tile.src;
+      tile.src = "";
+      setTimeout(() => { tile.src = src + (src.includes("?") ? "&" : "?") + "r=" + Math.random(); }, 500);
+    }
+  });
+  return layer;
+}
+function switchBaseLayer() {
+  if (baseLayer) map.removeLayer(baseLayer);
+  baseLayer = makeBaseLayer();
+  baseLayer.addTo(map);
+  baseLayer.bringToBack();
+  renderPlaceLabels();
+  refreshAttribution();
+}
+// 渲染多语言地名标注层
+function renderPlaceLabels() {
+  if (labelLayer) map.removeLayer(labelLayer);
+  labelLayer = L.layerGroup();
+  const lang = state.lang || "zh";
+  const theme = document.documentElement.getAttribute("data-theme") || "dark";
+  if (!window.PLACE_LABELS) return;
+  window.PLACE_LABELS.forEach((p) => {
+    const name = p[lang] || p.zh;
+    const icon = L.divIcon({
+      className: "place-label",
+      html: `<span class="pl pl-${p.type}">${name}</span>`,
+      iconSize: [0, 0],
+      iconAnchor: [0, 0],
+    });
+    L.marker([p.lat, p.lon], { icon, interactive: false, keyboard: false }).addTo(labelLayer);
+  });
+  labelLayer.addTo(map);
+}
+function refreshAttribution() {
+  map.attributionControl.setPrefix("");
+  if (map.attributionControl && map.attributionControl._container) {
+    map.attributionControl._container.innerHTML =
+      `<span class="attr-text">${t("mapAttr")}</span>`;
+  }
+}
+
+// 比例尺控件 (公制, 右下)
+L.control.scale({ imperial: false, metric: true, position: "bottomright" }).addTo(map);
+
+// 修复 Leaflet 在弹性容器内尺寸不准导致瓦片只渲染一部分的问题
+requestAnimationFrame(() => map.invalidateSize());
+window.addEventListener("resize", () => map.invalidateSize());
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) setTimeout(() => map.invalidateSize(), 100);
+});
+
+// ===== 主题切换 (白天/夜晚) =====
+const THEME_KEY = "typhoon-theme";
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  // 主题切换时重建底图, 同步滤镜类 (保留当前语言 hl)
+  switchBaseLayer();
+  const btn = document.getElementById("btnTheme");
+  if (btn) btn.setAttribute("data-current", theme);
+}
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute("data-theme") || "dark";
+  const next = cur === "dark" ? "light" : "dark";
+  applyTheme(next);
+  try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+  // 切换主题后重渲染当前台风, 让路径点边框/风圈空心色跟随主题
+  if (state.currentTyphoon) {
+    state.fitOnRender = false;
+    renderTyphoon(state.currentTyphoon);
+  }
+}
+function initTheme() {
+  let theme;
+  try { theme = localStorage.getItem(THEME_KEY); } catch (e) {}
+  if (!theme) {
+    theme = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  }
+  applyTheme(theme);
+}
+
+// 图层组
+const layers = {
+  track: L.layerGroup().addTo(map),
+  forecast: L.layerGroup().addTo(map),
+  wind: L.layerGroup().addTo(map),
+  marker: L.layerGroup().addTo(map),
+  jma: L.layerGroup().addTo(map),   // JMA 对比路径
+};
+
+// ===== 状态 =====
+const state = {
+  typhoons: [],
+  selectedId: null,
+  currentTyphoon: null,
+  year: new Date().getFullYear(),
+  fitOnRender: true,
+  autoTimer: null,
+  lang: "zh",
+};
+
+// ===== UI 元素 =====
+const el = {
+  yearSelect: document.getElementById("yearSelect"),
+  prevYear: document.getElementById("prevYear"),
+  nextYear: document.getElementById("nextYear"),
+  list: document.getElementById("tyList"),
+  hint: document.getElementById("sidebarHint"),
+  loader: document.getElementById("loader"),
+  detailCard: document.getElementById("detailCard"),
+  warningBanner: document.getElementById("warningBanner"),
+  warnText: document.getElementById("warnText"),
+  updated: document.getElementById("updated"),
+  autoToggle: document.getElementById("autoToggle"),
+  btnRefresh: document.getElementById("btnRefresh"),
+  legendRows: document.getElementById("legendRows"),
+};
+
+// ===== 图例 =====
+function buildLegend() {
+  const order = ["TD", "TS", "STS", "TY", "STY", "SuperTY"];
+  el.legendRows.innerHTML = order
+    .map(
+      (g) =>
+        `<div class="legend-row"><i style="background:${gradeInfo(g).color}"></i>` +
+        `<span>${gradeInfo(g).name} (${g})</span></div>`
+    )
+    .join("");
+  document.getElementById("legendTitle1").textContent = t("legendTitle");
+  document.getElementById("legendTitle2").textContent = t("windTitle");
+  document.getElementById("legendW7").textContent = t("wind7");
+  document.getElementById("legendW10").textContent = t("wind10");
+  document.getElementById("legendW12").textContent = t("wind12");
+}
+
+// ===== 年份选择器 =====
+function fillYearSelect() {
+  const cur = new Date().getFullYear();
+  let html = "";
+  for (let y = cur; y >= 2000; y--) {
+    html += `<option value="${y}"${y === state.year ? " selected" : ""}>${y}${t("yearSuffix")}</option>`;
+  }
+  el.yearSelect.innerHTML = html;
+}
+
+// ===== 加载台风列表 =====
+async function loadList(year) {
+  state.year = year;
+  el.hint.textContent = t("loading");
+  el.list.innerHTML = "";
+  try {
+    const data = await cmaFetch(cmaListUrl(year), TTL_LIST);
+    state.typhoons = normalizeList(data);
+    renderList();
+    el.updated.textContent = `${t("updated")} ${new Date().toLocaleTimeString("zh-CN")}`;
+    // 默认选中活跃台风 (若无活跃, 选最新一个)
+    if (state.typhoons.length) {
+      const active = state.typhoons.find((t2) => t2.state === "start");
+      const target = active || state.typhoons[0];
+      selectTyphoon(target.id, { fit: true });
+    }
+  } catch (e) {
+    el.hint.textContent = t("loadFailed");
+  }
+}
+
+function renderList() {
+  if (!state.typhoons.length) {
+    el.hint.textContent = t("noRecord");
+    return;
+  }
+  el.hint.textContent = `${state.typhoons.length} ${t("countSuffix")}`;
+  el.list.innerHTML = state.typhoons
+    .map((ty) => {
+      const live = ty.state === "start";
+      const main = tyName(ty);
+      const sub = state.lang === "zh" ? ty.name_en : (ty.name_cn || ty.name_en);
+      return `<li class="ty-item${ty.id === state.selectedId ? " active" : ""}" data-id="${ty.id}">
+        <span class="ty-num">${ty.num}</span>
+        <div class="ty-main">
+          <div class="ty-name">${main}</div>
+          <div class="ty-en">${sub}</div>
+        </div>
+        <span class="ty-state ${live ? "live" : "done"}">${live ? t("live") : t("stopped")}</span>
+      </li>`;
+    })
+    .join("");
+  el.list.querySelectorAll(".ty-item").forEach((node) => {
+    node.addEventListener("click", () => {
+      const id = Number(node.dataset.id);
+      selectTyphoon(id, { fit: true });
+    });
+  });
+}
+
+// ===== 选中并加载详情 =====
+async function selectTyphoon(id, opts = {}) {
+  state.selectedId = id;
+  state.fitOnRender = !!opts.fit;
+  el.loader.hidden = false;
+  document.getElementById("loaderText").textContent = t("loadTip");
+  // 高亮列表
+  el.list.querySelectorAll(".ty-item").forEach((n) =>
+    n.classList.toggle("active", Number(n.dataset.id) === id)
+  );
+  try {
+    const data = await cmaFetch(cmaViewUrl(id), TTL_DETAIL);
+    const ty = normalizeTyphoon(data);
+    if (!ty) throw new Error("empty");
+    state.currentTyphoon = ty;
+    renderTyphoon(ty);
+  } catch (e) {
+    el.loader.hidden = true;
+  }
+}
+
+// ===== 渲染台风 =====
+function clearLayers() {
+  layers.track.clearLayers();
+  layers.forecast.clearLayers();
+  layers.wind.clearLayers();
+  layers.marker.clearLayers();
+  layers.jma.clearLayers();
+}
+
+function renderTyphoon(ty) {
+  clearLayers();
+  if (!ty || !ty.points || !ty.points.length) {
+    el.loader.hidden = true;
+    return;
+  }
+  const pts = ty.points;
+  const last = pts[pts.length - 1];
+  const lastGrade = gradeOf(last);
+  const live = ty.state === "start";
+
+  // --- 历史路径: 分段按强度着色 ---
+  for (let i = 0; i < pts.length - 1; i++) {
+    const g = gradeOf(pts[i]);
+    const color = gradeInfo(g).color;
+    L.polyline(
+      [[pts[i].lat, pts[i].lon], [pts[i + 1].lat, pts[i + 1].lon]],
+      { color, weight: 3.5, opacity: 0.95 }
+    ).addTo(layers.track);
+  }
+
+  // --- 路径点标记 + 弹窗 ---
+  pts.forEach((p, i) => {
+    const g = gradeOf(p);
+    const isLast = i === pts.length - 1;
+    const color = gradeInfo(g).color;
+    if (live && isLast) {
+      // 活跃当前位置: 脉冲标记
+      const icon = L.divIcon({
+        className: "live-marker",
+        html:
+          '<div class="live-ring"></div>' +
+          '<div class="live-ring live-ring-2"></div>' +
+          '<div class="live-core"></div>',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+      });
+      L.marker([p.lat, p.lon], { icon }).addTo(layers.marker).bindPopup(popupHtml(p, ty, true));
+    } else {
+      L.circleMarker([p.lat, p.lon], {
+        radius: isLast ? 5 : 3.5,
+        color: bgStrokeColor(),
+        weight: 1,
+        fillColor: color,
+        fillOpacity: 1,
+      }).addTo(layers.marker).bindPopup(popupHtml(p, ty, false));
+    }
+  });
+
+  // --- 预报路径 (虚线, 按预报强度着色) ---
+  const agencies = Object.keys(ty.forecast || {});
+  agencies.forEach((ag) => {
+    const fc = ty.forecast[ag];
+    if (!fc || !fc.length) return;
+    const pathPts = [{ lat: last.lat, lon: last.lon, grade: lastGrade, wind: last.wind, time: last.time, lead: 0 }];
+    fc.forEach((f) => pathPts.push(f));
+    for (let i = 0; i < pathPts.length - 1; i++) {
+      const a = pathPts[i], b = pathPts[i + 1];
+      const g = gradeOf(b);
+      L.polyline(
+        [[a.lat, a.lon], [b.lat, b.lon]],
+        { color: gradeInfo(g).color, weight: 2, opacity: 0.8, dashArray: "5 5" }
+      ).addTo(layers.forecast);
+    }
+    // 预报点标记 (空心)
+    fc.forEach((f) => {
+      const g = gradeOf(f);
+      L.circleMarker([f.lat, f.lon], {
+        radius: 3,
+        color: gradeInfo(g).color,
+        weight: 1.5,
+        fillColor: bgStrokeColor(),
+        fillOpacity: 1,
+      })
+        .addTo(layers.forecast)
+        .bindPopup(forecastPopupHtml(f, ag, ty));
+    });
+  });
+
+  // --- 风圈 (当前位置的四象限) ---
+  renderWindCircles(last);
+
+  // --- 详情卡 + 预警 ---
+  updateDetailCard(last, ty);
+  updateWarning(last, ty, live);
+
+  // --- 视图适配 ---
+  if (state.fitOnRender) {
+    const all = [[last.lat, last.lon]];
+    pts.forEach((p) => all.push([p.lat, p.lon]));
+    agencies.forEach((ag) => (ty.forecast[ag] || []).forEach((f) => all.push([f.lat, f.lon])));
+    map.fitBounds(L.latLngBounds(all), { padding: [40, 40], maxZoom: 7 });
+  }
+
+  // --- 多源对比: 异步加载 JMA 同编号台风路径 ---
+  loadJmaCompare(ty);
+
+  el.loader.hidden = true;
+}
+
+// ===== JMA 多源对比 =====
+// CMA 台风编号(如 2613) → JMA tropicalCyclone(如 TC2615): JMA 的 TC 编号比 CMA 多2
+// (JMA 把年初的热带低压也编号, 所以同一年 JMA 编号通常比 CMA 大 1~2)
+// 实际做法: 先获取 JMA targetTc 列表, 按 typhoonNumber 匹配 CMA 编号
+async function loadJmaCompare(cmaTy) {
+  layers.jma.clearLayers();
+  if (!cmaTy || !cmaTy.num) return;
+  try {
+    // 1) 获取 JMA 当前目标台风列表, 找到 typhoonNumber == cmaTy.num 的 TC
+    const listData = await jmaFetch(`${JMA_BASE}/data/targetTc.json`, TTL_LIST);
+    const jmaItem = (listData || []).find((t) => t.typhoonNumber === String(cmaTy.num));
+    if (!jmaItem) return;  // JMA 无此台风(可能已停编或非活跃)
+    // 2) 获取 JMA 详情
+    const rawJma = await jmaFetch(`${JMA_BASE}/data/${jmaItem.tropicalCyclone}/forecast.json`, TTL_DETAIL);
+    const jma = normalizeJmaTyphoon(rawJma);
+    if (!jma || !jma.track) return;
+    // 3) 画 JMA 历史路径 (紫色虚线, 与 CMA 青色实线对比)
+    const trackLatLngs = jma.track.map((p) => [p.lat, p.lon]);
+    if (trackLatLngs.length > 1) {
+      L.polyline(trackLatLngs, {
+        color: "#9b59b6", weight: 2, opacity: 0.7, dashArray: "8 4",
+      }).addTo(layers.jma).bindPopup(
+        `<div class="popup-title">JMA 路径 · ${jma.name_jp || jma.name_en || ""}</div>` +
+        `<div class="popup-row">来源: 日本气象厅 (JMA)</div>` +
+        `<div class="popup-row">实况点数: <b>${jma.track.length}</b></div>`
+      );
+    }
+    // 4) 画 JMA 预报路径 (紫色点划线)
+    if (jma.forecast && jma.forecast.length) {
+      const last = jma.track[jma.track.length - 1];
+      const fcLatLngs = [[last.lat, last.lon], ...jma.forecast.map((f) => [f.lat, f.lon])];
+      L.polyline(fcLatLngs, {
+        color: "#9b59b6", weight: 1.5, opacity: 0.6, dashArray: "2 6",
+      }).addTo(layers.jma);
+      // JMA 预报点标记
+      jma.forecast.forEach((f) => {
+        L.circleMarker([f.lat, f.lon], {
+          radius: 3, color: "#9b59b6", weight: 1.5,
+          fillColor: bgStrokeColor(), fillOpacity: 1,
+        }).addTo(layers.jma).bindPopup(
+          `<div class="popup-title">JMA 预报 · ${f.lead}小时</div>` +
+          `<div class="popup-row">位置: <b>${f.lat.toFixed(1)}°, ${f.lon.toFixed(1)}°</b></div>` +
+          `<div class="popup-row">来源: 日本气象厅 (JMA)</div>`
+        );
+      });
+    }
+    // 5) 更新对比面板
+    updateComparePanel(cmaTy, jma);
+  } catch (e) {
+    // JMA 获取失败, 静默处理
+    updateComparePanel(cmaTy, null);
+  }
+}
+
+// 多源对比面板 (详情卡下方)
+function updateComparePanel(cmaTy, jma) {
+  const panel = document.getElementById("comparePanel");
+  if (!panel) return;
+  if (!jma) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  // CMA 当前位置
+  const cmaLast = cmaTy.points[cmaTy.points.length - 1];
+  const jmaCurrent = jma.track[jma.track.length - 1];
+  // 距离差 (km, 粗算)
+  const dist = haversine(cmaLast.lat, cmaLast.lon, jmaCurrent.lat, jmaCurrent.lon);
+  document.getElementById("cmpCmaPos").textContent = `${cmaLast.lat.toFixed(1)}°, ${cmaLast.lon.toFixed(1)}°`;
+  document.getElementById("cmpJmaPos").textContent = `${jmaCurrent.lat.toFixed(1)}°, ${jmaCurrent.lon.toFixed(1)}°`;
+  document.getElementById("cmpDist").textContent = `${dist.toFixed(0)} km`;
+  document.getElementById("cmpJmaName").textContent = `${jma.name_jp || ""} ${jma.name_en || ""}`;
+}
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371, toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ===== 数据源 (浏览器直连, 无需后端代理) =====
+// CMA 中央气象台: HTTPS + 开放 CORS, 返回 JSONP 包裹(需剥离外壳)
+// JMA 日本气象厅: HTTPS + 开放 CORS, 返回纯 JSON
+// 二者均可在国内浏览器直接访问, 因此整个站点可纯静态部署、永久可达、无需梯子
+const CMA_BASE = "https://typhoon.nmc.cn/weatherservice/typhoon/jsons";
+const JMA_BASE = "https://www.jma.go.jp/bosai/typhoon";
+
+// 客户端 TTL 缓存, 避免频繁请求被上游限流
+const _cache = new Map();
+function _cacheGet(url, ttl) {
+  const c = _cache.get(url);
+  if (c && Date.now() - c.ts < ttl) return c.data;
+  return null;
+}
+function _cacheSet(url, data) { _cache.set(url, { data, ts: Date.now() }); }
+
+// 剥离 JSONP 外壳: 取首个 { 到最后一个 } 之间的内容
+function stripJsonp(text) {
+  const s = String(text).trim();
+  const first = s.indexOf("{");
+  const last = s.lastIndexOf("}");
+  if (first === -1 || last === -1 || last <= first) throw new Error("CMA 返回格式异常");
+  return JSON.parse(s.slice(first, last + 1));
+}
+
+async function cmaFetch(url, ttl) {
+  const cached = _cacheGet(url, ttl);
+  if (cached) return cached;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`CMA ${res.status}`);
+  const data = stripJsonp(await res.text());
+  _cacheSet(url, data);
+  return data;
+}
+async function jmaFetch(url, ttl) {
+  const cached = _cacheGet(url, ttl);
+  if (cached) return cached;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`JMA ${res.status}`);
+  const data = await res.json();
+  _cacheSet(url, data);
+  return data;
+}
+
+const TTL_LIST = 5 * 60 * 1000;
+const TTL_DETAIL = 2 * 60 * 1000;
+
+function cmaListUrl(year) {
+  const t = Date.now();
+  return year === new Date().getFullYear()
+    ? `${CMA_BASE}/list_default?t=${t}&callback=cma_list`
+    : `${CMA_BASE}/list_${year}?callback=cma_list_${year}`;
+}
+function cmaViewUrl(id) {
+  return `${CMA_BASE}/view_${id}?t=${Date.now()}&callback=cma_view_${id}`;
+}
+
+// 归一化函数 (移植自原 Node 代理服务端)
+function normalizeList(data) {
+  const list = (data && data.typhoonList) || [];
+  return list.map((t) => ({
+    id: t[0], name_en: t[1], name_cn: t[2], num: t[4], meaning: t[6], state: t[7],
+  }));
+}
+function normalizeTyphoon(data) {
+  const ty = data && data.typhoon;
+  if (!ty) return null;
+  const rawPoints = ty[8] || [];
+  const points = rawPoints.map((p) => ({
+    pid: p[0], time: p[1], ts: p[2], grade: p[3], lon: p[4], lat: p[5],
+    pressure: p[6], wind: p[7], moveDir: p[8], moveSpeed: p[9],
+    radii: (p[10] || []).map((r) => ({ knot: r[0], ne: r[1], se: r[2], sw: r[3], nw: r[4] })),
+    forecast: p[11] || {},
+  }));
+  let latestForecast = {};
+  if (points.length) {
+    const fc = points[points.length - 1].forecast || {};
+    for (const [agency, arr] of Object.entries(fc)) {
+      latestForecast[agency] = (arr || []).map((f) => ({
+        lead: f[0], time: f[1], lon: f[2], lat: f[3], pressure: f[4], wind: f[5], grade: f[7],
+      }));
+    }
+  }
+  return {
+    id: ty[0], name_en: ty[1], name_cn: ty[2], num: ty[4], meaning: ty[6], state: ty[7],
+    points, forecast: latestForecast,
+  };
+}
+function normalizeJmaTyphoon(data) {
+  if (!Array.isArray(data)) return null;
+  const title = data.find((d) => d.part === "title") || {};
+  const items = data.filter((d) => d.part && typeof d.part === "object");
+  const analysis = items.find((d) => d.advancedHours === 0);
+  const trackPts = [];
+  if (analysis && analysis.track && analysis.track.typhoon) {
+    analysis.track.typhoon.forEach((pt) => trackPts.push({ lat: pt[0], lon: pt[1], type: "past" }));
+  }
+  if (analysis && analysis.center) trackPts.push({ lat: analysis.center[0], lon: analysis.center[1], type: "current" });
+  const forecastPts = [];
+  items.filter((d) => d.advancedHours > 0).forEach((d) => {
+    if (d.center) forecastPts.push({
+      lat: d.center[0], lon: d.center[1], lead: d.advancedHours,
+      time: d.validtime && d.validtime.UTC,
+      radius: d.probabilityCircle ? d.probabilityCircle.radius : null,
+    });
+  });
+  return {
+    source: "JMA", typhoonNumber: title.typhoonNumber,
+    name_jp: title.name && title.name.jp, name_en: title.name && title.name.en,
+    issue: title.issue && title.issue.UTC, track: trackPts, forecast: forecastPts,
+  };
+}
+
+function renderWindCircles(point) {
+  if (!point.radii || !point.radii.length) return;
+  // 按 tier 从大到小排序绘制 (7级最大在最底, 12级最小在最上)
+  const sorted = [...point.radii].sort((a, b) => tierRank(b.knot) - tierRank(a.knot));
+  sorted.forEach((r) => {
+    const meta = WIND_TIER[r.knot];
+    if (!meta) return;
+    if (!(r.ne || r.se || r.sw || r.nw)) return;
+    const latlngs = windCircleLatLngs(point.lat, point.lon, r.ne, r.se, r.sw, r.nw);
+    if (latlngs.length < 3) return;
+    L.polygon(latlngs, {
+      color: meta.color,
+      weight: 1,
+      opacity: 0.7,
+      fillColor: meta.color,
+      fillOpacity: 0.12,
+      interactive: false,
+    }).addTo(layers.wind);
+  });
+}
+function tierRank(knot) {
+  return { "64KTS": 12, "50KTS": 10, "30KTS": 7 }[knot] || 0;
+}
+
+function popupHtml(p, ty, isLive) {
+  const g = gradeOf(p);
+  const info = gradeInfo(g);
+  return (
+    `<div class="popup-title">${ty.num}${t("typhoonNo")} ${tyName(ty)} ${isLive ? "· " + t("currentPos") : ""}</div>` +
+    `<div class="popup-row"><b>${fmtTime(p.time)}</b></div>` +
+    `<div class="popup-row">${t("level")}: <b>${info.name} (${g})</b></div>` +
+    `<div class="popup-row">${t("position")}: <b>${p.lat.toFixed(1)}°${t("north")}, ${p.lon.toFixed(1)}°${t("east")}</b></div>` +
+    `<div class="popup-row">${t("pressure")}: <b>${p.pressure} hPa</b></div>` +
+    `<div class="popup-row">${t("wind")}: <b>${p.wind} m/s</b></div>` +
+    `<div class="popup-row">${t("moveDir")}: <b>${dirCn(p.moveDir)}</b> · ${t("moveSpeed")}: <b>${p.moveSpeed} km/h</b></div>`
+  );
+}
+function forecastPopupHtml(f, agency, ty) {
+  const g = gradeOf(f);
+  const info = gradeInfo(g);
+  return (
+    `<div class="popup-title">${t("forecastBy")} · ${agencyCn(agency)} (${f.lead}${t("hours")})</div>` +
+    `<div class="popup-row">${t("baseTime")}: <b>${fmtTime(f.time)}</b></div>` +
+    `<div class="popup-row">${t("level")}: <b>${info.name} (${g})</b></div>` +
+    `<div class="popup-row">${t("position")}: <b>${f.lat.toFixed(1)}°${t("north")}, ${f.lon.toFixed(1)}°${t("east")}</b></div>` +
+    `<div class="popup-row">${t("pressure")}: <b>${f.pressure} hPa</b></div>` +
+    `<div class="popup-row">${t("wind")}: <b>${f.wind} m/s</b></div>`
+  );
+}
+
+// ===== 详情卡 =====
+function updateDetailCard(p, ty) {
+  el.detailCard.hidden = false;
+  const g = gradeOf(p);
+  const info = gradeInfo(g);
+  document.getElementById("dcNum").textContent = `${ty.num}${t("typhoonNo")}`;
+  document.getElementById("dcName").textContent = tyName(ty);
+  const st = document.getElementById("dcState");
+  const live = ty.state === "start";
+  st.textContent = live ? t("live") : t("stopped2");
+  st.className = `dc-state ${live ? "live" : "done"}`;
+  document.getElementById("dcGrade").innerHTML =
+    `<span style="color:${info.color}">●</span> ${info.name}`;
+  document.getElementById("dcPos").textContent = `${p.lat.toFixed(1)}°${t("north")}, ${p.lon.toFixed(1)}°${t("east")}`;
+  document.getElementById("dcPressure").textContent = `${p.pressure} hPa`;
+  document.getElementById("dcWind").textContent = `${p.wind} m/s`;
+  document.getElementById("dcMoveDir").textContent = dirCn(p.moveDir);
+  document.getElementById("dcMoveSpeed").textContent = `${p.moveSpeed} km/h`;
+  document.getElementById("dcTime").textContent = `${t("latestPos")} · ${fmtTime(p.time)}`;
+  // 字段名标签
+  document.getElementById("lblGrade").textContent = t("level");
+  document.getElementById("lblPos").textContent = t("position");
+  document.getElementById("lblPressure").textContent = t("pressure");
+  document.getElementById("lblWind").textContent = t("wind");
+  document.getElementById("lblMoveDir").textContent = t("moveDir");
+  document.getElementById("lblMoveSpeed").textContent = t("moveSpeed");
+}
+
+// ===== 预警横幅 =====
+function updateWarning(p, ty, live) {
+  const g = gradeOf(p);
+  if (!live || g === "TD" || g === "TS") {
+    el.warningBanner.hidden = true;
+    return;
+  }
+  el.warningBanner.hidden = false;
+  el.warningBanner.classList.remove("warn-orange", "warn-yellow");
+  let level, cls;
+  // 预警等级名按语言
+  const levelName = {
+    red: { zh: "红色", en: "Red", ja: "紅色" },
+    orange: { zh: "橙色", en: "Orange", ja: "橙色" },
+    yellow: { zh: "黄色", en: "Yellow", ja: "黄色" },
+  };
+  const lang = state.lang || "zh";
+  if (g === "SuperTY") { level = levelName.red[lang]; cls = ""; }
+  else if (g === "STY") { level = levelName.red[lang]; cls = ""; }
+  else if (g === "TY") { level = levelName.orange[lang]; cls = "warn-orange"; }
+  else { level = levelName.yellow[lang]; cls = "warn-yellow"; } // STS
+  if (cls) el.warningBanner.classList.add(cls);
+  el.warnText.textContent =
+    `${t("warningTitle")} · ${level} ｜ ${ty.num}${t("typhoonNo")} ${tyName(ty)} ${t("warningBody")}${gradeInfo(g).name}，` +
+    `${t("warningTail")} ${p.wind} m/s，${t("pressure")} ${p.pressure} hPa，${t("warningTip")}`;
+}
+
+// ===== 自动刷新 =====
+function startAuto() {
+  stopAuto();
+  if (!el.autoToggle.checked) return;
+  state.autoTimer = setInterval(async () => {
+    // 刷新列表 (更新状态) 与所选活跃台风详情
+    try {
+      const data = await cmaFetch(cmaListUrl(state.year), TTL_LIST);
+      state.typhoons = normalizeList(data);
+      renderList();
+      el.updated.textContent = `${t("updated")} ${new Date().toLocaleTimeString("zh-CN")}`;
+    } catch (e) {}
+    if (state.currentTyphoon && state.currentTyphoon.state === "start" && state.selectedId) {
+      // 静默刷新详情 (不重置视图)
+      try {
+        const d2 = await cmaFetch(cmaViewUrl(state.selectedId), TTL_DETAIL);
+        const ty = normalizeTyphoon(d2);
+        if (!ty) throw new Error("empty");
+        state.currentTyphoon = ty;
+        state.fitOnRender = false;
+        renderTyphoon(ty);
+      } catch (e) {}
+    }
+  }, 60000);
+}
+function stopAuto() {
+  if (state.autoTimer) clearInterval(state.autoTimer);
+  state.autoTimer = null;
+}
+
+// ===== 事件绑定 =====
+el.yearSelect.addEventListener("change", (e) => loadList(Number(e.target.value)));
+el.prevYear.addEventListener("click", () => {
+  const y = Number(el.yearSelect.value);
+  if (y > 2000) { el.yearSelect.value = y - 1; loadList(y - 1); }
+});
+el.nextYear.addEventListener("click", () => {
+  const y = Number(el.yearSelect.value);
+  const cur = new Date().getFullYear();
+  if (y < cur) { el.yearSelect.value = y + 1; loadList(y + 1); }
+});
+el.btnRefresh.addEventListener("click", () => loadList(state.year));
+el.autoToggle.addEventListener("change", startAuto);
+document.getElementById("btnTheme").addEventListener("click", toggleTheme);
+document.getElementById("langSelect").addEventListener("change", (e) => {
+  const lang = e.target.value;
+  if (!I18N[lang]) return;
+  applyLang(lang);
+  try { localStorage.setItem(LANG_KEY, lang); } catch (e2) {}
+  refreshLangUI();
+});
+
+// ===== 启动 =====
+initTheme();
+initLang();
+refreshLangUI();
+loadList(new Date().getFullYear());
+startAuto();

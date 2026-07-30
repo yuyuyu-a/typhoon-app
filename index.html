@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>台风实况 · 实时追踪</title>
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"></div>
+      <div class="brand-text">
+        <h1 id="hdrTitle">台风实况</h1>
+        <span class="brand-sub" id="hdrSub">实时路径 · 预报 · 风圈 · 历史</span>
+      </div>
+    </div>
+    <div class="header-meta">
+      <span class="src" id="hdrSrc">数据来源：中央气象台 typhoon.nmc.cn</span>
+      <span class="updated" id="updated">更新于 —</span>
+      <label class="autorefresh">
+        <input type="checkbox" id="autoToggle" checked />
+        <span id="lblAuto">自动刷新</span>
+      </label>
+      <button class="btn-refresh" id="btnRefresh" title="立即刷新">刷新</button>
+      <select id="langSelect" class="lang-select" title="切换语言 / Language">
+        <option value="zh">中文</option>
+        <option value="en">English</option>
+        <option value="ja">日本語</option>
+      </select>
+      <button class="btn-theme" id="btnTheme" title="切换白天/夜晚模式" aria-label="切换主题">
+        <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" fill="currentColor"/>
+        </svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <circle cx="12" cy="12" r="4.2" fill="currentColor"/>
+          <g stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="12" y1="2" x2="12" y2="4.5"/><line x1="12" y1="19.5" x2="12" y2="22"/>
+            <line x1="2" y1="12" x2="4.5" y2="12"/><line x1="19.5" y1="12" x2="22" y2="12"/>
+            <line x1="4.6" y1="4.6" x2="6.3" y2="6.3"/><line x1="17.7" y1="17.7" x2="19.4" y2="19.4"/>
+            <line x1="4.6" y1="19.4" x2="6.3" y2="17.7"/><line x1="17.7" y1="6.3" x2="19.4" y2="4.6"/>
+          </g>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="warning-banner" id="warningBanner" hidden>
+    <span class="warn-dot"></span>
+    <span class="warn-text" id="warnText"></span>
+  </div>
+
+  <main class="app-body">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <button class="nav-btn" id="prevYear" title="上一年" aria-label="上一年">&lt;</button>
+        <select id="yearSelect" class="year-select" title="选择年份"></select>
+        <button class="nav-btn" id="nextYear" title="下一年" aria-label="下一年">&gt;</button>
+      </div>
+      <div class="sidebar-hint" id="sidebarHint">加载中…</div>
+      <ul class="ty-list" id="tyList"></ul>
+    </aside>
+
+    <section class="map-wrap">
+      <div id="map"></div>
+
+      <div class="detail-card" id="detailCard" hidden>
+        <div class="dc-head">
+          <span class="dc-num" id="dcNum">—</span>
+          <span class="dc-name" id="dcName">—</span>
+          <span class="dc-state" id="dcState"></span>
+        </div>
+        <div class="dc-grid">
+          <div class="dc-cell"><span class="k" id="lblGrade">等级</span><span class="v" id="dcGrade">—</span></div>
+          <div class="dc-cell"><span class="k" id="lblPos">中心位置</span><span class="v mono" id="dcPos">—</span></div>
+          <div class="dc-cell"><span class="k" id="lblPressure">中心气压</span><span class="v mono" id="dcPressure">—</span></div>
+          <div class="dc-cell"><span class="k" id="lblWind">最大风速</span><span class="v mono" id="dcWind">—</span></div>
+          <div class="dc-cell"><span class="k" id="lblMoveDir">移动方向</span><span class="v mono" id="dcMoveDir">—</span></div>
+          <div class="dc-cell"><span class="k" id="lblMoveSpeed">移动速度</span><span class="v mono" id="dcMoveSpeed">—</span></div>
+        </div>
+        <div class="dc-foot mono" id="dcTime">—</div>
+      </div>
+
+      <div class="compare-panel" id="comparePanel" hidden>
+        <div class="cmp-title">多源对比 · CMA vs JMA</div>
+        <div class="cmp-row">
+          <span class="cmp-src" style="color:#2dd4bf">● CMA 中央气象台</span>
+          <span class="cmp-val mono" id="cmpCmaPos">—</span>
+        </div>
+        <div class="cmp-row">
+          <span class="cmp-src" style="color:#9b59b6">● JMA <span id="cmpJmaName"></span></span>
+          <span class="cmp-val mono" id="cmpJmaPos">—</span>
+        </div>
+        <div class="cmp-row cmp-dist">
+          <span class="cmp-src">位置偏差</span>
+          <span class="cmp-val mono" id="cmpDist">—</span>
+        </div>
+      </div>
+
+      <div class="legend" id="legend">
+        <div class="legend-title" id="legendTitle1">强度等级</div>
+        <div class="legend-rows" id="legendRows"></div>
+        <div class="legend-title" id="legendTitle2" style="margin-top:8px">风圈</div>
+        <div class="legend-wind">
+          <span><i class="wc wc7"></i><span id="legendW7">7级</span></span>
+          <span><i class="wc wc10"></i><span id="legendW10">10级</span></span>
+          <span><i class="wc wc12"></i><span id="legendW12">12级</span></span>
+        </div>
+      </div>
+
+      <div class="loader" id="loader" hidden><span class="spinner"></span> <span id="loaderText">加载台风数据…</span></div>
+    </section>
+  </main>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="places.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
