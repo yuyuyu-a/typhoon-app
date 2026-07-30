@@ -83,18 +83,16 @@
       </div>
 
       <div class="compare-panel" id="comparePanel" hidden>
-        <div class="cmp-title">多源对比 · CMA vs JMA</div>
-        <div class="cmp-row">
-          <span class="cmp-src" style="color:#2dd4bf">● CMA 中央气象台</span>
-          <span class="cmp-val mono" id="cmpCmaPos">—</span>
-        </div>
-        <div class="cmp-row">
-          <span class="cmp-src" style="color:#9b59b6">● JMA <span id="cmpJmaName"></span></span>
-          <span class="cmp-val mono" id="cmpJmaPos">—</span>
-        </div>
-        <div class="cmp-row cmp-dist">
-          <span class="cmp-src">位置偏差</span>
-          <span class="cmp-val mono" id="cmpDist">—</span>
+        <div class="cmp-title">多源对比 · 路径偏差</div>
+        <div class="cmp-legend" id="cmpLegend"></div>
+        <div class="cmp-rows" id="cmpRows"></div>
+        <div class="cmp-settings">
+          <div class="cmp-set-title" id="cmpSetTitle">和风天气 QWeather（可选）</div>
+          <div class="cmp-set-row">
+            <input type="password" id="qwKey" placeholder="粘贴和风天气 API Key" autocomplete="off" />
+            <button id="qwSave" class="btn-mini">保存并启用</button>
+          </div>
+          <div class="cmp-set-hint" id="qwHint"></div>
         </div>
       </div>
 

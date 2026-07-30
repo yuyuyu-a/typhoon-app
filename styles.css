@@ -475,11 +475,33 @@ html, body {
 }
 [data-theme="light"] .compare-panel { background: rgba(255,255,255,0.95); box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
 .cmp-title { font-size: 11px; font-weight: 600; color: var(--text-dim); margin-bottom: 8px; letter-spacing: 0.3px; }
-.cmp-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; }
-.cmp-src { color: var(--text-dim); font-size: 11px; }
-.cmp-val { color: var(--text); font-size: 12px; }
-.cmp-dist { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--border-soft); }
-.cmp-dist .cmp-val { color: var(--accent); font-weight: 600; }
+.cmp-legend { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+.cmp-legend .lg-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
+.cmp-legend .lg-dot { width: 14px; height: 3px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+.cmp-rows { display: flex; flex-direction: column; }
+.cmp-source-row { padding: 5px 0; border-top: 1px solid var(--border-soft); }
+.cmp-source-row:first-child { border-top: none; padding-top: 0; }
+.cmp-src-name { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); margin-bottom: 2px; }
+.cmp-src-name .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.cmp-pos { font-family: var(--mono); font-size: 12px; color: var(--text); }
+.cmp-dev { font-family: var(--mono); font-size: 12px; color: var(--accent); font-weight: 600; margin-top: 1px; }
+.cmp-na { color: var(--text-faint); font-size: 11px; }
+.cmp-settings { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-soft); }
+.cmp-set-title { font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
+.cmp-set-row { display: flex; gap: 6px; }
+.cmp-set-row input {
+  flex: 1; min-width: 0; background: var(--bg-elev); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 11px;
+}
+.cmp-set-row input:focus { outline: none; border-color: var(--accent); }
+.btn-mini {
+  background: var(--accent-dim); color: #04110f; border: none; border-radius: 6px;
+  padding: 5px 10px; font-size: 11px; cursor: pointer; white-space: nowrap; font-weight: 600;
+}
+.btn-mini:hover { filter: brightness(1.1); }
+.cmp-set-hint { font-size: 10px; color: var(--text-faint); margin-top: 5px; line-height: 1.5; }
+.cmp-set-hint.err { color: #ff8a7e; }
+.cmp-set-hint.ok { color: var(--accent); }
 
 /* ===== 自建多语言地名标注层 ===== */
 .place-label { background: transparent !important; border: none !important; }
