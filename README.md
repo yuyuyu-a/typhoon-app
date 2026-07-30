@@ -11,14 +11,14 @@
 <p align="center">
   <a href="https://github.com/yuyuyu-a/typhoon-app/actions/workflows/pages.yml"><img src="https://github.com/yuyuyu-a/typhoon-app/actions/workflows/pages.yml/badge.svg" alt="Deploy to GitHub Pages" /></a>
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" />
-  <img src="https://img.shields.io/badge/data-CMA%20%7C%20JMA%20%7C%20QWeather-orange.svg" alt="Data Source" />
+  <img src="https://img.shields.io/badge/data-CMA%20%7C%20JMA%20%7C%20NASA%20EONET-orange.svg" alt="Data Source" />
   <img src="https://img.shields.io/badge/frontend-HTML%2FJS%20%2F%20Leaflet-2ea44f.svg" alt="Frontend" />
   <img src="https://img.shields.io/badge/i18n-中文%20%7C%20English%20%7C%20日本語-9cf.svg" alt="i18n" />
 </p>
 
 ---
 
-一个 **零后端、零构建、纯前端** 的实时台风追踪应用。数据由用户浏览器**直接**请求中国中央气象台（CMA）与日本气象厅（JMA）的官方接口，无需任何服务器中转，部署到任意静态托管即可永久访问。
+一个 **零后端、零构建、纯前端** 的实时台风追踪应用。数据由用户浏览器**直接**请求中国中央气象台（CMA）、日本气象厅（JMA）以及 NASA EONET 的公开接口，无需任何服务器中转，部署到任意静态托管即可永久访问。
 
 ## ✨ 在线演示
 
@@ -39,7 +39,7 @@
 - **💨 风圈可视化**：按 30 / 50 / 64 kt 等级绘制七级、十级、十二级风圈（四象限半径插值生成多边形）。
 - **🌓 白天 / 夜晚模式**：一键切换明暗主题，地图与界面同步变色。
 - **🌐 三语界面 + 三语地图地名**：中 / 英 / 日 自由切换，**不仅是按钮文案，连地图上的海域、国家、城市标注也会随之切换语言**。
-- **⚖️ 可插拔多源对比**：采用**数据源注册表**架构，同一台风可同时叠加多个官方机构路径并在对比面板显示各源当前位置偏差（km）。内置 **CMA（中央气象台，主路径）** 与 **JMA（日本气象厅）** 两个免 key 源；另支持接入 **QWeather 和风天气**（国内公司、含 JTWC 级强度，需在对比面板粘贴免费 API Key 启用）。后续可一行代码扩展更多源。
+- **⚖️ 可插拔多源对比**：采用**数据源注册表**架构，同一台风可同时叠加多个机构路径并在对比面板显示各源当前位置偏差（km）。内置 **CMA（中央气象台，主路径）**、**JMA（日本气象厅）** 与 **NASA EONET（公开免费、免 Key）** 三个源，全部浏览器直连、无需任何密钥。后续可一行代码扩展更多源。
 - **📱 响应式布局**：适配桌面与移动端，手机也能看。
 - **🚀 完全自包含**：地图库 Leaflet 已本地化，**不依赖任何国外 CDN**，国内网络下稳定加载。
 
@@ -51,8 +51,8 @@
 │ (纯静态页面)  │                        │  typhoon.nmc.cn   │
 │             │ ─────────────────────▶ │  JMA 日本气象厅    │
 │             │                        │  jma.go.jp        │
-│             │ ──(可选, 带API Key)──▶ │  QWeather 和风天气 │
-└─────────────┘      HTTPS + CORS       │  api.qweather.com  │
+│             │ ─────────────────────▶ │  NASA EONET       │
+└─────────────┘      HTTPS + CORS       │  eonet.gsfc.nasa.gov │
       │
       │ 本地解析 JSONP / JSON + 数据源注册表归一化
       ▼
@@ -61,7 +61,7 @@
 
 - **无后端**：彻底抛弃 Node 代理，浏览器直连官方接口，关掉本机进程也不影响线上访问。
 - **无构建**：原生 HTML / CSS / JS，双击 `index.html` 即可运行，也可直接丢上任意静态托管。
-- **可插拔数据源注册表**：`app.js` 中的 `COMPARE_SOURCES` 数组统一管理各机构路径的获取与归一化（CMA 剥离 JSONP、JMA 解析 JSON、QWeather 解析 storm-list/track/forecast），新增数据源只需往数组里加一项，渲染与对比面板自动适配。
+- **可插拔数据源注册表**：`app.js` 中的 `COMPARE_SOURCES` 数组统一管理各机构路径的获取与归一化（CMA 剥离 JSONP、JMA 解析 JSON、NASA EONET 解析 events 轨迹），新增数据源只需往数组里加一项，渲染与对比面板自动适配。
 
 ## 📡 数据源说明
 
@@ -69,13 +69,13 @@
 |------|------|------|:----:|:---:|------|
 | CMA | 中国中央气象台 | `https://typhoon.nmc.cn/weatherservice/typhoon/jsons/` | ✅ CORS `*` | 无需 | 列表 `list_default`，详情 `view_{长ID}`（主路径） |
 | JMA | 日本气象厅 | `https://www.jma.go.jp/bosai/typhoon/data/` | ✅ CORS `*` | 无需 | 列表 `targetTc.json`，详情 `data/TCxxxx/forecast.json` |
-| QWeather | 和风天气（中国） | `https://api.qweather.com/v7/tropical/` | ✅ CORS `*` | 免费 Key | `storm-list` + `storm-track` + `storm-forecast`；含 JTWC 级强度 |
+| NASA EONET | 美国 NASA | `https://eonet.gsfc.nasa.gov/api/v3/events` | ✅ CORS `*` | 无需 | `category=severeStorms` 返回全球热带气旋逐点轨迹（含风速 knots） |
 
-- CMA / JMA 两个接口**免 key、HTTPS + 开放 CORS**，国内浏览器可免梯子直连。
-- **QWeather 为可选源**：在应用右下角「多源对比」面板的输入框粘贴免费 API Key（仅存于本机浏览器 `localStorage`）即可启用，对比面板会增加一条青绿色路径与偏差。Key 从 [dev.qweather.com](https://dev.qweather.com/) 控制台创建项目获取（免费版有调用次数限制）。
-- 关于"为什么只有这几个源"：在**纯静态、无后端、国内直连**的约束下，只有 CMA/JMA 是免 key 且开放 CORS 的官方源；JTWC（美国）、NRL、Zoom Earth 等 or 因国内网络不可达、或缺失 CORS 头，无法在浏览器直连使用。QWeather 作为国内权威源补齐了第三方对比。
+- CMA / JMA / NASA EONET 三个接口**均免 key、HTTPS + 开放 CORS**，国内浏览器可免梯子直连。
+- **NASA EONET 为公开的全球灾害事件 API**（CC BY 4.0），免费、免 Key、开放 CORS；其 severeStorms 分类包含全球热带气旋的逐点轨迹（时间 + 经纬度 + 风速），按英文名与 CMA 台风匹配后叠加到对比面板。
+- 关于"为什么只有这几个源"：在**纯静态、无后端、国内直连**的约束下，只有 CMA / JMA / NASA EONET 是免 key 且开放 CORS 的源；JTWC（美国）、NRL、Zoom Earth、Open-Meteo（无专用台风路径接口）、GDACS（仅预警多边形、非中心轨迹）等或因国内网络不可达、或缺失 CORS 头、或数据形态不匹配，无法作为逐点轨迹对比源使用。
 - CMA 详情接口的 ID 为**长编号**（列表项 `t[0]`），非短编号 `t[4]`，已处理。
-- CMA 与 JMA 的台风通过 `typhoonNumber` 字段关联匹配（短编号可能存在 1~2 的差异，故不直接用短号匹配）；QWeather 通过 `basin=NP` + 编号/英文名匹配。
+- CMA 与 JMA 的台风通过 `typhoonNumber` 字段关联匹配（短编号可能存在 1~2 的差异，故不直接用短号匹配）；NASA EONET 通过标题含 CMA 英文名（如 "SUPER TYPHOON DOLPHIN" 含 "DOLPHIN"）匹配。
 
 ## 📂 目录结构
 
@@ -127,8 +127,8 @@ https://e6f844d833a340e699296dff94d0ce83.sh2.agentos-app.net
 ## ❓ 常见问题
 
 - **地图地名不显示？** 检查右上角语言切换是否已选择，地名标注层会随语言刷新。
-- **数据加载失败？** 确认网络可访问 `typhoon.nmc.cn` 与 `jma.go.jp`；公司网络若封锁外网可能受影响。
-- **QWeather 显示「暂无该台风数据 / 获取失败」？** 免费 Key 可能未开通台风接口权限，或当日调用次数用尽；检查 Key 是否正确，或到 QWeather 控制台确认套餐包含热带气旋 API。
+- **数据加载失败？** 确认网络可访问 `typhoon.nmc.cn`、`jma.go.jp` 与 `eonet.gsfc.nasa.gov`；公司网络若封锁外网可能受影响。
+- **NASA EONET 显示「暂无该台风数据」？** EONET 仅收录有逐点轨迹且处于近 60 天活动窗口内的热带气旋；若当前台风在 EONET 中无匹配英文名或已超出时间窗，对比面板会跳过该源（属正常情况）。
 - **为什么不用 GitHub Pages 做国内主站？** GitHub Pages 在国内需梯子，故国内主站用 CloudStudio，GitHub 主要做代码托管与海外访问。
 
 ## 🗺️ 后续计划

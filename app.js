@@ -51,7 +51,7 @@ const I18N = {
     _label: "中文",
     title: "台风实况",
     subtitle: "实时路径 · 预报 · 风圈 · 历史",
-    dataSource: "数据：中央气象台 CMA · 日本气象厅 JMA · 和风天气 QWeather（可选）",
+    dataSource: "数据：中央气象台 CMA · 日本气象厅 JMA · NASA EONET（公开免费）",
     updated: "更新于",
     autoRefresh: "自动刷新",
     refresh: "刷新",
@@ -94,7 +94,7 @@ const I18N = {
     _label: "English",
     title: "Typhoon Live",
     subtitle: "Track · Forecast · Wind Circle · History",
-    dataSource: "Source: CMA · JMA · QWeather (optional)",
+    dataSource: "Source: CMA · JMA · NASA EONET (free, public)",
     updated: "Updated",
     autoRefresh: "Auto-refresh",
     refresh: "Refresh",
@@ -137,7 +137,7 @@ const I18N = {
     _label: "日本語",
     title: "台風実況",
     subtitle: "進路・予報・風域・履歴",
-    dataSource: "データ元：CMA · JMA · QWeather（任意）",
+    dataSource: "データ元：CMA · JMA · NASA EONET（無料公開）",
     updated: "更新",
     autoRefresh: "自動更新",
     refresh: "更新",
@@ -428,7 +428,7 @@ const layers = {
   forecast: L.layerGroup().addTo(map),
   wind: L.layerGroup().addTo(map),
   marker: L.layerGroup().addTo(map),
-  compare: L.layerGroup().addTo(map),   // 多源对比路径 (JMA / QWeather 等)
+  compare: L.layerGroup().addTo(map),   // 多源对比路径 (JMA / NASA EONET 等)
   live: L.layerGroup().addTo(map),  // 实时估算标记 (独立于其它层, 不被 clearLayers 清除)
 };
 
@@ -718,7 +718,7 @@ function renderTyphoon(ty) {
     map.fitBounds(L.latLngBounds(all), { padding: [40, 40], maxZoom: 7 });
   }
 
-  // --- 多源对比: 异步加载 JMA / QWeather 等同编号台风路径 ---
+  // --- 多源对比: 异步加载 JMA / NASA EONET 等同台风路径 ---
   loadCompareSources(ty);
   // --- 实时估算位置 (两报之间持续外推) ---
   updateLiveEstimate(ty);
@@ -746,78 +746,51 @@ const COMPARE_SOURCES = [
     },
   },
   {
-    id: "qweather",
-    name: { zh: "和风天气 QWeather", en: "QWeather", ja: "QWeather" },
-    color: "#1abc9c", dash: "2 6", needKey: true, enabled: false,
-    async load(cmaTy, key) {
-      const host = "https://api.qweather.com";
-      const sid = "NP" + cmaTy.num;  // 西北太平洋 basin=NP, 编号与 CMA 同年号一致
-      // 1) 风暴列表, 按编号/英文名匹配 CMA 当前台风
-      const listRes = await fetch(`${host}/v7/tropical/storm-list?basin=NP&key=${encodeURIComponent(key)}`);
-      if (!listRes.ok) throw new Error("QWeather list " + listRes.status);
-      const lj = await listRes.json();
-      if (!lj || lj.code !== "200") throw new Error("QWeather " + (lj && lj.code));
-      const nameUp = (cmaTy.name_en || "").toUpperCase();
-      const storms = lj.stormList || lj.stormID || [];
-      const storm =
-        storms.find((s) => s.stormId === sid) ||
-        storms.find((s) => (s.name || "").toUpperCase() === nameUp) ||
-        storms.find((s) => String(s.stormId || "").indexOf(cmaTy.num) >= 0) ||
-        null;
-      if (!storm) return null;
-      const sid2 = storm.stormId;
-      // 2) 历史 + 当前路径
-      const trackRes = await fetch(`${host}/v7/tropical/storm-track?stormid=${encodeURIComponent(sid2)}&key=${encodeURIComponent(key)}`);
-      if (!trackRes.ok) throw new Error("QWeather track " + trackRes.status);
-      const tj = await trackRes.json();
-      if (!tj || tj.code !== "200") throw new Error("QWeather track " + (tj && tj.code));
-      const track = (tj.track || []).map((p) => ({
-        lat: parseFloat(p.lat), lon: parseFloat(p.lon),
-        time: fmtQTime(p.time), grade: p.type,
-      }));
-      if (tj.now) {
-        track.push({
-          lat: parseFloat(tj.now.lat), lon: parseFloat(tj.now.lon),
-          time: fmtQTime(tj.now.pubTime), grade: tj.now.type, isNow: true,
-        });
-      }
-      // 3) 预报路径 (独立接口)
-      let forecast = [];
-      try {
-        const fcRes = await fetch(`${host}/v7/tropical/storm-forecast?stormid=${encodeURIComponent(sid2)}&key=${encodeURIComponent(key)}`);
-        if (fcRes.ok) {
-          const fj = await fcRes.json();
-          if (fj && fj.code === "200" && fj.forecast) {
-            forecast = fj.forecast.map((f) => ({
-              lat: parseFloat(f.lat), lon: parseFloat(f.lon),
-              lead: qLeadHours(f.fxTime, tj.now && tj.now.pubTime),
-              time: fmtQTime(f.fxTime), grade: f.type,
-            }));
-          }
-        }
-      } catch (e) { /* 预报失败不影响历史路径 */ }
-      return { name: storm.name || "", track, forecast };
+    id: "eonet",
+    name: { zh: "NASA EONET", en: "NASA EONET", ja: "NASA EONET" },
+    color: "#e67e22", dash: "2 6", needKey: false, enabled: true,
+    async load(cmaTy) {
+      // NASA EONET: 公开免费 / 免 Key / 开放 CORS, 提供全球热带气旋逐点轨迹
+      const data = await fetchEonet();
+      const ename = (cmaTy.name_en || "").trim().toUpperCase();
+      if (!ename) return null;
+      const ev = (data.events || []).find((e) => {
+        const title = (e.title || "").toUpperCase();
+        return title.includes(ename);   // "SUPER TYPHOON DOLPHIN" 含 "DOLPHIN"
+      });
+      if (!ev) return null;
+      const pts = (ev.geometry || [])
+        .filter((g) => g.type === "Point" && g.coordinates && g.coordinates.length >= 2)
+        .map((g) => {
+          const lon = +g.coordinates[0], lat = +g.coordinates[1];
+          const mag = g.magnitudeValue != null ? +g.magnitudeValue : null;
+          return {
+            lat, lon,
+            time: g.date || null,
+            wind: mag != null ? mag * 0.514444 : null, // knots → m/s, 与 CMA/JMA 一致
+          };
+        })
+        .sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
+      if (!pts.length) return null;
+      return { name: ev.title || "", track: pts, forecast: [] };
     },
   },
 ];
 
-// QWeather 时间 "2026-07-28T12:00+08:00" → "2026-07-28 12:00"
-function fmtQTime(s) {
-  if (!s) return null;
-  return String(s).replace("T", " ").replace(/[-+]\d\d:\d\d.*$/, "").replace(/Z$/, "");
-}
-// 预报时效(小时): fxTime - now 时间差
-function qLeadHours(fxTime, nowTime) {
-  if (!fxTime || !nowTime) return null;
-  const a = Date.parse(fxTime), b = Date.parse(nowTime);
-  if (isNaN(a) || isNaN(b)) return null;
-  return Math.round((a - b) / 3600000);
+// NASA EONET 事件列表(含全球热带气旋逐点轨迹), 内存缓存 10 分钟避免重复拉取
+let _eonetCache = null, _eonetCacheT = 0;
+async function fetchEonet() {
+  const now = Date.now();
+  if (_eonetCache && now - _eonetCacheT < 10 * 60 * 1000) return _eonetCache;
+  const url = "https://eonet.gsfc.nasa.gov/api/v3/events?category=severeStorms&days=60&status=all";
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("EONET " + res.status);
+  _eonetCache = await res.json();
+  _eonetCacheT = now;
+  return _eonetCache;
 }
 
-// QWeather API Key 管理 (仅存于本机 localStorage)
-const QW_KEY_KEY = "typhoon-qweather-key";
-function getQwKey() { try { return localStorage.getItem(QW_KEY_KEY) || ""; } catch (e) { return ""; } }
-function setQwKey(k) { try { localStorage.setItem(QW_KEY_KEY, k); } catch (e) {} }
+// 数据源名(按当前语言)
 function srcName(src) { const n = src.name || {}; return n[state.lang] || n.zh || src.id; }
 
 // 入口: 加载所有已启用的对比源, 绘制并填充面板
@@ -827,13 +800,12 @@ async function loadCompareSources(cmaTy) {
   if (!panel) return;
   if (!cmaTy || !cmaTy.num) { panel.hidden = true; return; }
   panel.hidden = false;
-  const key = getQwKey();
   const results = [];
   for (const src of COMPARE_SOURCES) {
     if (!src.enabled) continue;
-    if (src.needKey && !key) { results.push({ src, status: "nokey" }); continue; }
+    if (src.needKey) { results.push({ src, status: "nokey" }); continue; }
     try {
-      const data = await src.load(cmaTy, key);
+      const data = await src.load(cmaTy);
       if (!data || !data.track || !data.track.length) { results.push({ src, status: "empty" }); continue; }
       drawCompareSource(src, data);
       results.push({ src, status: "ok", data });
@@ -844,16 +816,32 @@ async function loadCompareSources(cmaTy) {
   renderComparePanel(cmaTy, results);
 }
 
+// 跨 180° 经线时把折线拆成多段, 避免地图上画出横贯地球的错线
+function antimeridianSegments(latlngs) {
+  const segs = [];
+  let cur = [];
+  for (let i = 0; i < latlngs.length; i++) {
+    if (cur.length && Math.abs(latlngs[i][1] - latlngs[i - 1][1]) > 180) {
+      segs.push(cur); cur = [];
+    }
+    cur.push(latlngs[i]);
+  }
+  if (cur.length) segs.push(cur);
+  return segs;
+}
+
 function drawCompareSource(src, data) {
   const latlngs = data.track.map((p) => [p.lat, p.lon]);
   if (latlngs.length > 1) {
-    L.polyline(latlngs, { color: src.color, weight: 2, opacity: 0.75, dashArray: src.dash })
-      .addTo(layers.compare)
-      .bindPopup(
-        `<div class="popup-title">${srcName(src)} 路径</div>` +
-        `<div class="popup-row">来源: ${srcName(src)}</div>` +
-        `<div class="popup-row">实况点数: <b>${data.track.length}</b></div>`
-      );
+    antimeridianSegments(latlngs).forEach((seg) => {
+      L.polyline(seg, { color: src.color, weight: 2, opacity: 0.75, dashArray: src.dash })
+        .addTo(layers.compare)
+        .bindPopup(
+          `<div class="popup-title">${srcName(src)} 路径</div>` +
+          `<div class="popup-row">来源: ${srcName(src)}</div>` +
+          `<div class="popup-row">实况点数: <b>${data.track.length}</b></div>`
+        );
+    });
   }
   if (data.forecast && data.forecast.length) {
     const lastT = data.track[data.track.length - 1];
@@ -881,7 +869,7 @@ function renderComparePanel(cmaTy, results) {
   // 图例 (含已启用的对比源)
   let legendHtml = `<div class="lg-row"><span class="lg-dot" style="background:#2dd4bf"></span><span>CMA 中央气象台（主路径）</span></div>`;
   COMPARE_SOURCES.forEach((s) => {
-    if (s.enabled && (!s.needKey || getQwKey())) {
+    if (s.enabled && !s.needKey) {
       legendHtml += `<div class="lg-row"><span class="lg-dot" style="background:${s.color}"></span><span>${s.name[lang] || s.name.zh}</span></div>`;
     }
   });
@@ -911,37 +899,7 @@ function renderComparePanel(cmaTy, results) {
   document.getElementById("cmpRows").innerHTML = rows;
 }
 
-// 和风天气 Key 输入初始化
-function initQwSettings() {
-  const input = document.getElementById("qwKey");
-  const save = document.getElementById("qwSave");
-  const hint = document.getElementById("qwHint");
-  if (!input || !save || !hint) return;
-  const key = getQwKey();
-  const qw = COMPARE_SOURCES.find((x) => x.id === "qweather");
-  if (key) {
-    input.value = key;
-    if (qw) qw.enabled = true;
-    hint.textContent = "已启用。修改后点“保存并启用”可更新。";
-    hint.className = "cmp-set-hint ok";
-  } else {
-    hint.textContent = "免费 Key：dev.qweather.com → 控制台 → 创建项目获取。仅存于本机浏览器。";
-    hint.className = "cmp-set-hint";
-  }
-  save.addEventListener("click", () => {
-    const k = input.value.trim();
-    setQwKey(k);
-    if (qw) qw.enabled = !!k;
-    if (k) {
-      hint.textContent = "已保存并启用，正在获取…";
-      hint.className = "cmp-set-hint ok";
-    } else {
-      hint.textContent = "已清空，QWeather 已停用。";
-      hint.className = "cmp-set-hint";
-    }
-    if (state.currentTyphoon) loadCompareSources(state.currentTyphoon);
-  });
-}
+// 两点间大圆距离(km)
 function haversine(lat1, lon1, lat2, lon2) {
   const R = 6371, toRad = (d) => (d * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
@@ -952,7 +910,7 @@ function haversine(lat1, lon1, lat2, lon2) {
 // ===== 数据源 (浏览器直连, 无需后端代理) =====
 // CMA 中央气象台: HTTPS + 开放 CORS, 返回 JSONP 包裹(需剥离外壳)
 // JMA 日本气象厅: HTTPS + 开放 CORS, 返回纯 JSON
-// QWeather 和风天气: HTTPS + 开放 CORS, 需免费 API Key(国内公司, 含 JTWC 级强度)
+// NASA EONET: HTTPS + 开放 CORS, 公开免费、免 Key, 提供全球热带气旋逐点轨迹
 // 三者均可在国内浏览器直接访问, 因此整个站点可纯静态部署、永久可达、无需梯子
 const CMA_BASE = "https://typhoon.nmc.cn/weatherservice/typhoon/jsons";
 const JMA_BASE = "https://www.jma.go.jp/bosai/typhoon";
@@ -1223,7 +1181,6 @@ document.getElementById("langSelect").addEventListener("change", (e) => {
 // ===== 启动 =====
 initTheme();
 initLang();
-initQwSettings();   // 恢复已保存的 QWeather Key 并启用对应源
 refreshLangUI();
 loadList(new Date().getFullYear());
 startAuto();
