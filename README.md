@@ -27,6 +27,10 @@
 | **GitHub Pages** | https://yuyuyu-a.github.io/typhoon-app/ | 需梯子 |
 | **CloudStudio（国内直连）** | https://e6f844d833a340e699296dff94d0ce83.sh2.agentos-app.net | ✅ 免梯子 |
 
+<p align="center">
+  <img src="screenshot.png" alt="台风实况运行截图 — 展示 2613 白海豚实时路径、风圈、多源对比（CMA vs JMA）" width="100%" />
+</p>
+
 ## 🌟 功能特性
 
 - **🛰️ 实时路径追踪**：展示台风当前位置、移动方向、移动速度，以及完整历史路径。
