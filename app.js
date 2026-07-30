@@ -242,10 +242,23 @@ const DIR_CN = {
 };
 function dirCn(d) { return DIR_CN[d] || d || "—"; }
 
+// 风向 → 方位角(度, 北=0 顺时针), 用于外推实时位置
+const DIR_BEARING = {
+  N: 0, NNE: 22.5, NE: 45, ENE: 67.5, E: 90, ESE: 112.5, SE: 135, SSE: 157.5,
+  S: 180, SSW: 202.5, SW: 225, WSW: 247.5, W: 270, WNW: 292.5, NW: 315, NNW: 337.5,
+};
+function dirBearing(d) { return DIR_BEARING[d]; }
+
 // 时间 "202607281200" → "2026-07-28 12:00"
 function fmtTime(s) {
   if (!s || s.length < 12) return s || "—";
   return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)} ${s.slice(8,10)}:${s.slice(10,12)}`;
+}
+
+// 时间字符串 "202607281200" → 毫秒时间戳(UTC)
+function parseTimeMs(s) {
+  if (!s || s.length < 12) return null;
+  return Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(8, 10), +s.slice(10, 12));
 }
 
 // ===== 地理计算 =====
@@ -416,6 +429,7 @@ const layers = {
   wind: L.layerGroup().addTo(map),
   marker: L.layerGroup().addTo(map),
   jma: L.layerGroup().addTo(map),   // JMA 对比路径
+  live: L.layerGroup().addTo(map),  // 实时估算标记 (独立于其它层, 不被 clearLayers 清除)
 };
 
 // ===== 状态 =====
@@ -426,6 +440,7 @@ const state = {
   year: new Date().getFullYear(),
   fitOnRender: true,
   autoTimer: null,
+  liveTimer: null,
   lang: "zh",
 };
 
@@ -455,7 +470,9 @@ function buildLegend() {
         `<div class="legend-row"><i style="background:${gradeInfo(g).color}"></i>` +
         `<span>${gradeInfo(g).name} (${g})</span></div>`
     )
-    .join("");
+    .join("") +
+    `<div class="legend-row"><i style="border:1px dashed #00e5ff;background:transparent"></i>` +
+    `<span>实时估算位置</span></div>`;
   document.getElementById("legendTitle1").textContent = t("legendTitle");
   document.getElementById("legendTitle2").textContent = t("windTitle");
   document.getElementById("legendW7").textContent = t("wind7");
@@ -553,6 +570,66 @@ function clearLayers() {
   layers.jma.clearLayers();
 }
 
+// ===== 实时估算标记 (两次官方播报之间持续外推移动) =====
+let liveMarker = null, liveConnector = null;
+// 基于官方最新定位 + 航向/移速, 外推"当前"实时估算位置
+function estimateCurrent(ty) {
+  const pts = ty.points;
+  if (!pts || !pts.length) return null;
+  const last = pts[pts.length - 1];
+  const bear = dirBearing(last.moveDir);
+  const speed = Number(last.moveSpeed) || 0; // km/h
+  if (bear == null || !speed) return { lat: last.lat, lon: last.lon, fromObs: true, obsTime: last.time };
+  const tObs = parseTimeMs(last.time);
+  if (!tObs) return { lat: last.lat, lon: last.lon, fromObs: true, obsTime: last.time };
+  let dtH = (Date.now() - tObs) / 3600000;
+  if (dtH < 0) dtH = 0;
+  if (dtH > 72) dtH = 72; // 超过 3 天不再外推, 防止漂移过大
+  const [elat, elon] = destination(last.lat, last.lon, bear, speed * dtH);
+  return { lat: elat, lon: elon, ageH: dtH, fromObs: false, obsTime: last.time };
+}
+// 绘制/重建实时估算标记与连线 (renderTyphoon 时调用)
+function updateLiveEstimate(ty) {
+  layers.live.clearLayers();
+  liveMarker = null; liveConnector = null;
+  if (!ty || ty.state !== "start") return;
+  const est = estimateCurrent(ty);
+  if (!est) return;
+  const last = ty.points[ty.points.length - 1];
+  if (!est.fromObs) {
+    liveConnector = L.polyline([[last.lat, last.lon], [est.lat, est.lon]], {
+      color: "#00e5ff", weight: 2, opacity: 0.6, dashArray: "3 6", interactive: false,
+    }).addTo(layers.live);
+  }
+  const icon = L.divIcon({
+    className: "live-marker live-est",
+    html: '<div class="live-ring"></div><div class="live-ring live-ring-2"></div><div class="live-core"></div>',
+    iconSize: [28, 28], iconAnchor: [14, 14],
+  });
+  liveMarker = L.marker([est.lat, est.lon], { icon, interactive: false }).addTo(layers.live).bindPopup(
+    '<div class="popup-title">📡 实时估算位置</div>' +
+    `<div class="popup-row">估算: <b>${est.lat.toFixed(2)}°, ${est.lon.toFixed(2)}°</b></div>` +
+    `<div class="popup-row">官方定位: <b>${last.lat.toFixed(1)}°, ${last.lon.toFixed(1)}°</b></div>` +
+    (est.obsTime ? `<div class="popup-row">官方时间: <b>${fmtTime(est.obsTime)}</b></div>` : "") +
+    (est.ageH != null ? `<div class="popup-row">外推时长: <b>${est.ageH.toFixed(1)}</b> 小时</div>` : "") +
+    '<div class="popup-row" style="opacity:.7">基于航向/移速外推, 仅供参考</div>'
+  );
+}
+// 每 3 秒平滑移动估算标记 (不重建, 动画不中断)
+function tickLiveEstimate() {
+  if (!state.currentTyphoon || state.currentTyphoon.state !== "start") return;
+  const est = estimateCurrent(state.currentTyphoon);
+  if (!est) return;
+  const last = state.currentTyphoon.points[state.currentTyphoon.points.length - 1];
+  if (!liveMarker) { updateLiveEstimate(state.currentTyphoon); return; }
+  liveMarker.setLatLng([est.lat, est.lon]);
+  if (liveConnector) liveConnector.setLatLngs([[last.lat, last.lon], [est.lat, est.lon]]);
+}
+function startLiveTick() {
+  if (state.liveTimer) clearInterval(state.liveTimer);
+  state.liveTimer = setInterval(tickLiveEstimate, 3000);
+}
+
 function renderTyphoon(ty) {
   clearLayers();
   if (!ty || !ty.points || !ty.points.length) {
@@ -580,17 +657,11 @@ function renderTyphoon(ty) {
     const isLast = i === pts.length - 1;
     const color = gradeInfo(g).color;
     if (live && isLast) {
-      // 活跃当前位置: 脉冲标记
-      const icon = L.divIcon({
-        className: "live-marker",
-        html:
-          '<div class="live-ring"></div>' +
-          '<div class="live-ring live-ring-2"></div>' +
-          '<div class="live-core"></div>',
-        iconSize: [28, 28],
-        iconAnchor: [14, 14],
-      });
-      L.marker([p.lat, p.lon], { icon }).addTo(layers.marker).bindPopup(popupHtml(p, ty, true));
+      // 官方最新定位点 (静态白色高亮), 实时估算点由 updateLiveEstimate 绘制
+      L.circleMarker([p.lat, p.lon], {
+        radius: 6, color: "#ffffff", weight: 2,
+        fillColor: color, fillOpacity: 1,
+      }).addTo(layers.marker).bindPopup(popupHtml(p, ty, true));
     } else {
       L.circleMarker([p.lat, p.lon], {
         radius: isLast ? 5 : 3.5,
@@ -649,6 +720,8 @@ function renderTyphoon(ty) {
 
   // --- 多源对比: 异步加载 JMA 同编号台风路径 ---
   loadJmaCompare(ty);
+  // --- 实时估算位置 (两报之间持续外推) ---
+  updateLiveEstimate(ty);
 
   el.loader.hidden = true;
 }
@@ -777,8 +850,8 @@ async function jmaFetch(url, ttl) {
   return data;
 }
 
-const TTL_LIST = 5 * 60 * 1000;
-const TTL_DETAIL = 2 * 60 * 1000;
+const TTL_LIST = 60 * 1000;
+const TTL_DETAIL = 30 * 1000;
 
 function cmaListUrl(year) {
   const t = Date.now();
@@ -974,7 +1047,7 @@ function startAuto() {
         renderTyphoon(ty);
       } catch (e) {}
     }
-  }, 60000);
+  }, 30000); // 每 30 秒刷新列表/活跃台风; 详情走 30 秒 TTL 缓存, 官方一发布即上图
 }
 function stopAuto() {
   if (state.autoTimer) clearInterval(state.autoTimer);
@@ -1009,3 +1082,4 @@ initLang();
 refreshLangUI();
 loadList(new Date().getFullYear());
 startAuto();
+startLiveTick();
