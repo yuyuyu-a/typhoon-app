@@ -12,6 +12,13 @@
 ## 在线访问（国内可达，无需梯子）
 https://e6f844d833a340e699296dff94d0ce83.sh2.agentos-app.net
 
+## 部署到 GitHub Pages
+1. 在 GitHub 新建仓库 `typhoon-app`（空仓库即可，请勿勾选 README）。
+2. 推送代码：`git push -u origin main`（已配置 SSH 走 22 端口，国内可达）。
+3. 仓库 Settings → Pages → Source 选 **GitHub Actions**。
+4. 推送后 Actions 自动构建部署，地址为 `https://<用户名>.github.io/typhoon-app/`。
+   - 注：GitHub Pages 在国内需梯子访问；国内免梯子请继续用上面的 CloudStudio 链接。
+
 ## 本地预览
 用任意静态服务器打开本目录即可，例如：
 ```bash
