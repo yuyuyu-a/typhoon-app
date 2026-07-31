@@ -51,7 +51,7 @@ const I18N = {
     _label: "中文",
     title: "台风实况",
     subtitle: "实时路径 · 预报 · 风圈 · 历史",
-    dataSource: "数据：中央气象台 CMA（主路径+预报）· 日本气象厅 JMA · NASA EONET（可选）",
+    dataSource: "数据：中央气象台 CMA（主路径 + 官方预报）",
     updated: "更新于",
     autoRefresh: "自动刷新",
     refresh: "刷新",
@@ -104,7 +104,7 @@ const I18N = {
     _label: "English",
     title: "Typhoon Live",
     subtitle: "Track · Forecast · Wind Circle · History",
-    dataSource: "Source: CMA (track+forecast) · JMA · NASA EONET (optional)",
+    dataSource: "Source: CMA (track + official forecast)",
     updated: "Updated",
     autoRefresh: "Auto-refresh",
     refresh: "Refresh",
@@ -157,7 +157,7 @@ const I18N = {
     _label: "日本語",
     title: "台風実況",
     subtitle: "進路・予報・風域・履歴",
-    dataSource: "データ元：CMA（主経路+予報）· JMA · NASA EONET（任意）",
+    dataSource: "データ元：CMA（主経路+公式予報）",
     updated: "更新",
     autoRefresh: "自動更新",
     refresh: "更新",
@@ -800,7 +800,7 @@ const COMPARE_SOURCES = [
   {
     id: "jma",
     name: { zh: "日本气象厅 JMA", en: "JMA (Japan)", ja: "気象庁 JMA" },
-    color: "#9b59b6", dash: "8 4", needKey: false, enabled: true,
+    color: "#9b59b6", dash: "8 4", needKey: false, enabled: false,  // 国外站点, 国内网络可能不可达, 按需手动开启
     async load(cmaTy) {
       const listData = await jmaFetch(`${JMA_BASE}/data/targetTc.json`, TTL_LIST);
       const jmaItem = (listData || []).find((t) => t.typhoonNumber === String(cmaTy.num));
@@ -814,7 +814,7 @@ const COMPARE_SOURCES = [
   {
     id: "eonet",
     name: { zh: "NASA EONET", en: "NASA EONET", ja: "NASA EONET" },
-    color: "#e67e22", dash: "2 6", needKey: false, enabled: true,
+    color: "#e67e22", dash: "2 6", needKey: false, enabled: false,  // 国外站点, 国内网络可能不可达, 按需手动开启
     async load(cmaTy) {
       // NASA EONET: 公开免费 / 免 Key / 开放 CORS, 提供全球热带气旋逐点轨迹
       const data = await fetchEonet();
@@ -876,7 +876,12 @@ async function loadCompareSources(cmaTy) {
     if (src.needKey) { results.push({ src, status: "nokey" }); continue; }
     try {
       const data = await src.load(cmaTy);
-      if (!data || !data.track || !data.track.length) { results.push({ src, status: "empty" }); continue; }
+      // forecastOnly 源(如 cma_fc)无实况 track, 只看 forecast; 常规源必须有 track
+      const hasData = data && (
+        (data.track && data.track.length) ||
+        (data.forecastOnly && data.forecast && data.forecast.length)
+      );
+      if (!hasData) { results.push({ src, status: "empty" }); continue; }
       drawCompareSource(src, data);
       const lyr = cmpLayers[src.id];
       if (lyr) { if (cmpVisible[src.id]) map.addLayer(lyr); else map.removeLayer(lyr); }
@@ -1061,9 +1066,7 @@ function haversine(lat1, lon1, lat2, lon2) {
 
 // ===== 数据源 (浏览器直连, 无需后端代理) =====
 // CMA 中央气象台: HTTPS + 开放 CORS, 返回 JSONP 包裹(需剥离外壳); 主路径 + 内置预报对比源
-// JMA 日本气象厅: HTTPS + 开放 CORS, 返回纯 JSON; 部分国内网络可能不可达(国外站点)
-// NASA EONET: HTTPS + 开放 CORS, 公开免费、免 Key, 全球热带气旋轨迹; 部分国内网络可能不可达
-// CMA 官方预报为内置源(无需额外网络请求), JMA/EONET 为外部可选源(网络通畅时自动加载)
+// JMA 日本气象厅 / NASA EONET: 已禁用(需外网, 国内部分网络不可达), 可手动 enabled:true 开启
 // 整个站点可纯静态部署、永久可达、无需梯子
 const CMA_BASE = "https://typhoon.nmc.cn/weatherservice/typhoon/jsons";
 const JMA_BASE = "https://www.jma.go.jp/bosai/typhoon";
