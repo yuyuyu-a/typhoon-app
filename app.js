@@ -94,6 +94,7 @@ const I18N = {
     cmpDev: "偏差",
     cmpNoData: "暂无该台风数据",
     cmpFail: "获取失败",
+    cmpNetErr: "源不可达（网络限制）",
     chipFc: "预报",
     chipWind: "风圈",
   },
@@ -144,6 +145,7 @@ const I18N = {
     cmpDev: "Dev",
     cmpNoData: "No data for this storm",
     cmpFail: "Fetch failed",
+    cmpNetErr: "Unreachable",
     chipFc: "Fcst",
     chipWind: "Wind",
   },
@@ -194,6 +196,7 @@ const I18N = {
     cmpDev: "差",
     cmpNoData: "この台風のデータなし",
     cmpFail: "取得失敗",
+    cmpNetErr: "到達不可（ネットワーク）",
     chipFc: "予報",
     chipWind: "風域",
   },
@@ -815,7 +818,9 @@ async function fetchEonet() {
   const url = "https://eonet.gsfc.nasa.gov/api/v3/events?category=severeStorms&days=60&status=all";
   const res = await fetch(url);
   if (!res.ok) throw new Error("EONET " + res.status);
-  _eonetCache = await res.json();
+  const text = await res.text();
+  if (!text || text.length < 20) throw new Error("EONET_EMPTY");
+  _eonetCache = JSON.parse(text);
   _eonetCacheT = now;
   return _eonetCache;
 }
@@ -843,7 +848,8 @@ async function loadCompareSources(cmaTy) {
       if (lyr) { if (cmpVisible[src.id]) map.addLayer(lyr); else map.removeLayer(lyr); }
       results.push({ src, status: "ok", data });
     } catch (e) {
-      results.push({ src, status: "error", error: e });
+      const isNet = !navigator.onLine || (e && /fetch|network|timeout|Failed to fetch|EONET_EMPTY|_EMPTY/i.test(String(e.message)));
+      results.push({ src, status: isNet ? "neterr" : "error", error: e });
     }
   }
   renderComparePanel(cmaTy, results);
@@ -868,7 +874,7 @@ function drawCompareSource(src, data) {
   const latlngs = data.track.map((p) => [p.lat, p.lon]);
   if (latlngs.length > 1) {
     antimeridianSegments(latlngs).forEach((seg) => {
-      L.polyline(seg, { color: src.color, weight: 2, opacity: 0.75, dashArray: src.dash })
+      L.polyline(seg, { color: src.color, weight: 3, opacity: 0.85, dashArray: src.dash })
         .addTo(layer)
         .bindPopup(
           `<div class="popup-title">${srcName(src)} 路径</div>` +
@@ -880,11 +886,11 @@ function drawCompareSource(src, data) {
   if (data.forecast && data.forecast.length) {
     const lastT = data.track[data.track.length - 1];
     const fcLatLngs = [[lastT.lat, lastT.lon], ...data.forecast.map((f) => [f.lat, f.lon])];
-    L.polyline(fcLatLngs, { color: src.color, weight: 1.5, opacity: 0.6, dashArray: "2 7" })
+    L.polyline(fcLatLngs, { color: src.color, weight: 2, opacity: 0.65, dashArray: "2 7" })
       .addTo(layer);
     data.forecast.forEach((f) => {
       L.circleMarker([f.lat, f.lon], {
-        radius: 3, color: src.color, weight: 1.5, fillColor: bgStrokeColor(), fillOpacity: 1,
+        radius: 4, color: src.color, weight: 1.5, fillColor: bgStrokeColor(), fillOpacity: 1,
       }).addTo(layer).bindPopup(
         `<div class="popup-title">${srcName(src)} 预报</div>` +
         `<div class="popup-row">位置: <b>${f.lat.toFixed(1)}°, ${f.lon.toFixed(1)}°</b></div>`
@@ -958,6 +964,8 @@ function renderComparePanel(cmaTy, results) {
       </div>`;
     } else if (r.status === "empty") {
       rows += `<div class="cmp-source-row"><div class="cmp-src-name"><span class="dot" style="background:${r.src.color}"></span>${r.src.name[lang] || r.src.name.zh}</div><div class="cmp-na">${T("cmpNoData")}</div></div>`;
+    } else if (r.status === "neterr") {
+      rows += `<div class="cmp-source-row"><div class="cmp-src-name"><span class="dot" style="background:${r.src.color}"></span>${r.src.name[lang] || r.src.name.zh}</div><div class="cmp-na">${T("cmpNetErr") || "源不可达"}</div></div>`;
     } else {
       rows += `<div class="cmp-source-row"><div class="cmp-src-name"><span class="dot" style="background:${r.src.color}"></span>${r.src.name[lang] || r.src.name.zh}</div><div class="cmp-na">${T("cmpFail")}</div></div>`;
     }

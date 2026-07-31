@@ -227,8 +227,8 @@ html, body {
 
 /* ===== 地图 ===== */
 .map-wrap { flex: 1; position: relative; min-width: 0; }
-#map { width: 100%; height: 100%; background: #05080c; }
-.leaflet-container { background: #05080c; font-family: var(--sans); }
+#map { width: 100%; height: 100%; background: #0a1628; }
+.leaflet-container { background: #0a1628; font-family: var(--sans); }
 
 /* 详情卡 */
 .detail-card {
@@ -408,7 +408,7 @@ html, body {
 
 /* ===== 白天模式专属覆盖 ===== */
 [data-theme="light"] #map,
-[data-theme="light"] .leaflet-container { background: #e8ecf0; }
+[data-theme="light"] .leaflet-container { background: #b0c4de; }
 
 /* 弹窗浅色 */
 [data-theme="light"] .leaflet-popup-content-wrapper {
