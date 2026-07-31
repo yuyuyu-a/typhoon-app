@@ -51,7 +51,7 @@ const I18N = {
     _label: "中文",
     title: "台风实况",
     subtitle: "实时路径 · 预报 · 风圈 · 历史",
-    dataSource: "数据：中央气象台 CMA（主路径 + 官方预报）",
+    dataSource: "数据：中央气象台 CMA（主路径 + 官方预报）· 浙江省水利厅（中/台/日/美 四机构预报，国内直连免外网）",
     updated: "更新于",
     autoRefresh: "自动刷新",
     refresh: "刷新",
@@ -159,7 +159,7 @@ const I18N = {
     _label: "日本語",
     title: "台風実況",
     subtitle: "進路・予報・風域・履歴",
-    dataSource: "データ元：CMA（主経路+公式予報）",
+    dataSource: "データ元：CMA（主経路+公式予報）· 浙江省水利庁（中/台/日/米 4機関予報、国内直結）",
     updated: "更新",
     autoRefresh: "自動更新",
     refresh: "更新",
@@ -789,6 +789,96 @@ function renderTyphoon(ty, curIndex) {
 // 每个源: id, 名称(多语), 颜色, 虚线样式, 是否需要 key, 是否启用,
 //   load(cmaTy, key) → { name, track:[{lat,lon,time?,grade?,isNow?}], forecast:[{lat,lon,lead?,time?}] } | null
 // 新增数据源只需往此数组里加一项, 渲染与对比面板会自动适配。
+
+// ===== 浙江省水利厅台风 API (国内政府源, 多机构预报聚合) =====
+// 免 key / JSON 直出 / CORS `*`; 单接口聚合 中国·中国台湾·日本·美国 四家预报路径
+// 经国内域名直连, 无需外网 (绕开 JMA/EONET 被墙问题); 仅含当前活跃台风
+// 列表: /Api/TyhoonActivity (站点拼写 bug: Tyhoon 漏 p)  详情: /Api/TyphoonInfo/{tfid}
+const ZJ_BASE = "https://typhoon.slt.zj.gov.cn";
+const ZJ_AGENCIES = ["中国", "中国台湾", "日本", "美国"];
+const _zjCache = new Map(); // num -> { t, v }
+
+async function zjFetchText(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("ZJ_HTTP_" + res.status);
+  const text = await res.text();
+  if (!text || text.length < 20) throw new Error("ZJ_EMPTY");
+  return text;
+}
+
+// 解析浙江详情 → { points:[历史实况], forecasts:{机构:[预报路径点]} }
+function parseZjDetail(detail) {
+  const points = (detail.points || []).map((p) => ({
+    time: p.time, lat: +p.lat, lon: +p.lng,
+    strong: p.strong || "", power: +p.power || 0,
+    speed: +p.speed || 0, pressure: +p.pressure || 0,
+    movedirection: p.movedirection || "", movespeed: +p.movespeed || 0,
+    forecast: p.forecast || [],  // 保留内嵌的多机构预报 (每个点含 forecast[])
+  }));
+  const last = points[points.length - 1];
+  const forecasts = {};
+  ZJ_AGENCIES.forEach((ag) => {
+    const fc = last && last.forecast ? (last.forecast.find((f) => f.tm === ag) || null) : null;
+    if (!fc || !fc.forecastpoints || !fc.forecastpoints.length) { forecasts[ag] = []; return; }
+    // 路径 = 最新实况点 + 该机构未来预报点
+    const pts = fc.forecastpoints.map((fp) => ({
+      time: fp.time, lat: +fp.lat, lon: +fp.lng,
+      strong: fp.strong || "", power: +fp.power || 0,
+      speed: +fp.speed || 0, pressure: +fp.pressure || 0,
+    }));
+    forecasts[ag] = [last, ...pts];
+  });
+  return { points, forecasts };
+}
+
+async function fetchZjDetail(cmaTy) {
+  const now = Date.now();
+  const key = "num:" + cmaTy.num;
+  if (_zjCache.has(key)) {
+    const c = _zjCache.get(key);
+    if (now - c.t < 5 * 60 * 1000) return c.v; // 5 分钟缓存 (中/台/日/美 四家源共享, 避免重复拉取)
+  }
+  // 1) 列表匹配 tfid
+  const list = JSON.parse(await zjFetchText(`${ZJ_BASE}/Api/TyhoonActivity`));
+  const ename = (cmaTy.name_en || "").trim().toUpperCase();
+  const item = (list || []).find((t) => {
+    if (ename && (t.enname || "").trim().toUpperCase() === ename) return true;
+    return t.tfid && cmaTy.num && String(t.tfid).slice(-4) === String(cmaTy.num).slice(-4);
+  });
+  if (!item) { _zjCache.set(key, { t: now, v: null }); return null; } // 该台风不在浙江列表(多为已停编), 视为无数据
+  // 2) 详情 → 解析 + 转 GCJ-02 (与高德底图对齐)
+  const detail = JSON.parse(await zjFetchText(`${ZJ_BASE}/Api/TyphoonInfo/${item.tfid}`));
+  const parsed = parseZjDetail(detail);
+  [...parsed.points, ...Object.values(parsed.forecasts).flat()].forEach(toGcj);
+  _zjCache.set(key, { t: now, v: parsed });
+  return parsed;
+}
+
+// 为某机构生成对比源 (forecastOnly 模式: 只画预报线, 不重复画实况)
+function makeZjSource(id, nameObj, color, dash, agency) {
+  return {
+    id, name: nameObj, color, dash,
+    needKey: false, enabled: true,
+    async load(cmaTy) {
+      const parsed = await fetchZjDetail(cmaTy);
+      if (!parsed) return null;
+      const fc = parsed.forecasts[agency] || [];
+      if (!fc.length) return null;
+      return {
+        name: agency,
+        track: [],
+        forecast: fc.map((f, i) => ({
+          lat: f.lat, lon: f.lon, time: f.time,
+          grade: gradeOf({ wind: f.speed }),
+          wind: f.speed, pressure: f.pressure,
+          lead: i, // 0 = 起点(最新实况点)
+        })),
+        forecastOnly: true,
+      };
+    },
+  };
+}
+
 const COMPARE_SOURCES = [
   {
     id: "cma_fc",
@@ -815,6 +905,10 @@ const COMPARE_SOURCES = [
       };
     },
   },
+  makeZjSource("zj_cn", { zh: "中国预报 (CMA)", en: "China (CMA)", ja: "中国予報 (CMA)" }, "#2ecc71", "1 6", "中国"),
+  makeZjSource("zj_tw", { zh: "中国台湾预报 (CWB)", en: "Taiwan (CWB)", ja: "台湾予報 (CWB)" }, "#3498db", "6 4", "中国台湾"),
+  makeZjSource("zj_jp", { zh: "日本预报 (JMA)", en: "Japan (JMA)", ja: "日本予報 (JMA)" }, "#9b59b6", "2 5", "日本"),
+  makeZjSource("zj_us", { zh: "美国预报 (JTWC)", en: "USA (JTWC)", ja: "米国予報 (JTWC)" }, "#e74c3c", "8 4", "美国"),
   {
     id: "jma",
     name: { zh: "日本气象厅 JMA", en: "JMA (Japan)", ja: "気象庁 JMA" },
@@ -1084,6 +1178,7 @@ function haversine(lat1, lon1, lat2, lon2) {
 
 // ===== 数据源 (浏览器直连, 无需后端代理) =====
 // CMA 中央气象台: HTTPS + 开放 CORS, 返回 JSONP 包裹(需剥离外壳); 主路径 + 内置预报对比源
+// 浙江省水利厅: 国内政府源, 免 key, JSON 直出, CORS `*`, 单接口聚合 中国/中国台湾/日本/美国 四家预报; 经国内域名直连, 无需外网
 // JMA 日本气象厅 / NASA EONET: 已禁用(需外网, 国内部分网络不可达), 可手动 enabled:true 开启
 // 整个站点可纯静态部署、永久可达、无需梯子
 const CMA_BASE = "https://typhoon.nmc.cn/weatherservice/typhoon/jsons";
