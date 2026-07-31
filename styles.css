@@ -478,6 +478,13 @@ html, body {
 .cmp-legend { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
 .cmp-legend .lg-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
 .cmp-legend .lg-dot { width: 14px; height: 3px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+.cmp-legend .lg-row.toggle { cursor: pointer; padding: 3px 0; user-select: none; }
+.cmp-legend .lg-row.toggle input[data-cmp] { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.cmp-legend .lg-name { flex: 1; font-size: 11px; color: var(--text); }
+.cmp-legend .chip { font-size: 10px; padding: 1px 5px; border-radius: 8px; white-space: nowrap; line-height: 1.5; }
+.cmp-legend .chip.on { background: rgba(45, 212, 191, 0.18); color: var(--accent); }
+.cmp-legend .chip.off { background: rgba(140, 140, 140, 0.15); color: var(--text-faint); }
+.cmp-foot { font-size: 10px; color: var(--text-faint); margin-top: 8px; line-height: 1.5; }
 .cmp-rows { display: flex; flex-direction: column; }
 .cmp-source-row { padding: 5px 0; border-top: 1px solid var(--border-soft); }
 .cmp-source-row:first-child { border-top: none; padding-top: 0; }

@@ -89,6 +89,13 @@ const I18N = {
     mapAttr: "地图底图 © OpenStreetMap 贡献者 · 台风数据 © 中央气象台",
     north: "北纬",
     east: "东经",
+    threePath: "三条路径对比",
+    cmpRef: "参考",
+    cmpDev: "偏差",
+    cmpNoData: "暂无该台风数据",
+    cmpFail: "获取失败",
+    chipFc: "预报",
+    chipWind: "风圈",
   },
   en: {
     _label: "English",
@@ -132,6 +139,13 @@ const I18N = {
     mapAttr: "Map © OpenStreetMap contributors · Typhoon data © CMA",
     north: "N",
     east: "E",
+    threePath: "3-Path Comparison",
+    cmpRef: "Ref",
+    cmpDev: "Dev",
+    cmpNoData: "No data for this storm",
+    cmpFail: "Fetch failed",
+    chipFc: "Fcst",
+    chipWind: "Wind",
   },
   ja: {
     _label: "日本語",
@@ -175,6 +189,13 @@ const I18N = {
     mapAttr: "地図 © OpenStreetMap 貢献者 · 台風データ © 中央気象台",
     north: "北緯",
     east: "東経",
+    threePath: "3経路比較",
+    cmpRef: "基準",
+    cmpDev: "差",
+    cmpNoData: "この台風のデータなし",
+    cmpFail: "取得失敗",
+    chipFc: "予報",
+    chipWind: "風域",
   },
 };
 const LANG_KEY = "typhoon-lang";
@@ -428,9 +449,16 @@ const layers = {
   forecast: L.layerGroup().addTo(map),
   wind: L.layerGroup().addTo(map),
   marker: L.layerGroup().addTo(map),
-  compare: L.layerGroup().addTo(map),   // 多源对比路径 (JMA / NASA EONET 等)
+  compare: L.layerGroup().addTo(map),   // (保留兼容) 多源对比已改用 cmpLayers 独立图层
   live: L.layerGroup().addTo(map),  // 实时估算标记 (独立于其它层, 不被 clearLayers 清除)
 };
+// 多源对比: 每个机构一个独立图层组, 支持单独开关
+const cmpLayers = {};
+const cmpVisible = {};
+function cmpLayer(id) {
+  if (!cmpLayers[id]) cmpLayers[id] = L.layerGroup().addTo(map);
+  return cmpLayers[id];
+}
 
 // ===== 状态 =====
 const state = {
@@ -475,6 +503,8 @@ function buildLegend() {
     `<span>实时估算位置</span></div>`;
   document.getElementById("legendTitle1").textContent = t("legendTitle");
   document.getElementById("legendTitle2").textContent = t("windTitle");
+  const ct = document.getElementById("cmpTitle");
+  if (ct) ct.textContent = t("threePath");
   document.getElementById("legendW7").textContent = t("wind7");
   document.getElementById("legendW10").textContent = t("wind10");
   document.getElementById("legendW12").textContent = t("wind12");
@@ -567,7 +597,7 @@ function clearLayers() {
   layers.forecast.clearLayers();
   layers.wind.clearLayers();
   layers.marker.clearLayers();
-  layers.compare.clearLayers();
+  Object.values(cmpLayers).forEach((l) => l.clearLayers());
 }
 
 // ===== 实时估算标记 (两次官方播报之间持续外推移动) =====
@@ -795,7 +825,7 @@ function srcName(src) { const n = src.name || {}; return n[state.lang] || n.zh |
 
 // 入口: 加载所有已启用的对比源, 绘制并填充面板
 async function loadCompareSources(cmaTy) {
-  layers.compare.clearLayers();
+  Object.values(cmpLayers).forEach((l) => l.clearLayers());
   const panel = document.getElementById("comparePanel");
   if (!panel) return;
   if (!cmaTy || !cmaTy.num) { panel.hidden = true; return; }
@@ -803,11 +833,14 @@ async function loadCompareSources(cmaTy) {
   const results = [];
   for (const src of COMPARE_SOURCES) {
     if (!src.enabled) continue;
+    if (!(src.id in cmpVisible)) cmpVisible[src.id] = true;
     if (src.needKey) { results.push({ src, status: "nokey" }); continue; }
     try {
       const data = await src.load(cmaTy);
       if (!data || !data.track || !data.track.length) { results.push({ src, status: "empty" }); continue; }
       drawCompareSource(src, data);
+      const lyr = cmpLayers[src.id];
+      if (lyr) { if (cmpVisible[src.id]) map.addLayer(lyr); else map.removeLayer(lyr); }
       results.push({ src, status: "ok", data });
     } catch (e) {
       results.push({ src, status: "error", error: e });
@@ -831,11 +864,12 @@ function antimeridianSegments(latlngs) {
 }
 
 function drawCompareSource(src, data) {
+  const layer = cmpLayer(src.id);
   const latlngs = data.track.map((p) => [p.lat, p.lon]);
   if (latlngs.length > 1) {
     antimeridianSegments(latlngs).forEach((seg) => {
       L.polyline(seg, { color: src.color, weight: 2, opacity: 0.75, dashArray: src.dash })
-        .addTo(layers.compare)
+        .addTo(layer)
         .bindPopup(
           `<div class="popup-title">${srcName(src)} 路径</div>` +
           `<div class="popup-row">来源: ${srcName(src)}</div>` +
@@ -847,16 +881,30 @@ function drawCompareSource(src, data) {
     const lastT = data.track[data.track.length - 1];
     const fcLatLngs = [[lastT.lat, lastT.lon], ...data.forecast.map((f) => [f.lat, f.lon])];
     L.polyline(fcLatLngs, { color: src.color, weight: 1.5, opacity: 0.6, dashArray: "2 7" })
-      .addTo(layers.compare);
+      .addTo(layer);
     data.forecast.forEach((f) => {
       L.circleMarker([f.lat, f.lon], {
         radius: 3, color: src.color, weight: 1.5, fillColor: bgStrokeColor(), fillOpacity: 1,
-      }).addTo(layers.compare).bindPopup(
+      }).addTo(layer).bindPopup(
         `<div class="popup-title">${srcName(src)} 预报</div>` +
         `<div class="popup-row">位置: <b>${f.lat.toFixed(1)}°, ${f.lon.toFixed(1)}°</b></div>`
       );
     });
   }
+  // 风圈 (该源有半径数据时绘制, 如 JMA 预报点的概率风圈)
+  drawCompareWindCircles(src, data, layer);
+}
+
+// 对比源风圈: 在带半径数据的位置绘制 (JMA 预报点 probabilityCircle.radius, 单位米)
+function drawCompareWindCircles(src, data, layer) {
+  (data.forecast || []).forEach((f) => {
+    if (!f.radius) return;
+    L.circle([f.lat, f.lon], {
+      radius: f.radius,
+      color: src.color, weight: 1, opacity: 0.5,
+      fillColor: src.color, fillOpacity: 0.06, interactive: false,
+    }).addTo(layer);
+  });
 }
 
 function renderComparePanel(cmaTy, results) {
@@ -865,18 +913,38 @@ function renderComparePanel(cmaTy, results) {
   if (!cmaTy) { panel.hidden = true; return; }
   panel.hidden = false;
   const lang = state.lang || "zh";
+  const T = (k) => t(k);
   const cmaLast = cmaTy.points[cmaTy.points.length - 1];
-  // 图例 (含已启用的对比源)
-  let legendHtml = `<div class="lg-row"><span class="lg-dot" style="background:#2dd4bf"></span><span>CMA 中央气象台（主路径）</span></div>`;
+  // 图例 = 各对比源开关 + 预报/风圈可用性
+  let legendHtml = "";
   COMPARE_SOURCES.forEach((s) => {
     if (s.enabled && !s.needKey) {
-      legendHtml += `<div class="lg-row"><span class="lg-dot" style="background:${s.color}"></span><span>${s.name[lang] || s.name.zh}</span></div>`;
+      const r = results.find((x) => x.src.id === s.id);
+      const hasFc = !!(r && r.status === "ok" && r.data.forecast && r.data.forecast.length);
+      const hasWind = !!(r && r.status === "ok" && (r.data.forecast || []).some((f) => f.radius));
+      const chk = cmpVisible[s.id] ? "checked" : "";
+      legendHtml += `<label class="lg-row toggle">
+        <input type="checkbox" data-cmp="${s.id}" ${chk} />
+        <span class="lg-dot" style="background:${s.color}"></span>
+        <span class="lg-name">${s.name[lang] || s.name.zh}</span>
+        <span class="chip ${hasFc ? "on" : "off"}">${T("chipFc")}${hasFc ? "✓" : "–"}</span>
+        <span class="chip ${hasWind ? "on" : "off"}">${T("chipWind")}${hasWind ? "✓" : "–"}</span>
+      </label>`;
     }
   });
   document.getElementById("cmpLegend").innerHTML = legendHtml;
-  // 行: CMA 自身 + 各对比源
+  document.querySelectorAll("#cmpLegend input[data-cmp]").forEach((cb) => {
+    cb.onchange = () => {
+      const id = cb.getAttribute("data-cmp");
+      cmpVisible[id] = cb.checked;
+      const lyr = cmpLayers[id];
+      if (!lyr) return;
+      if (cb.checked) map.addLayer(lyr); else map.removeLayer(lyr);
+    };
+  });
+  // 位置 / 偏差 行: CMA 参考 + 各对比源
   let rows = `<div class="cmp-source-row">
-    <div class="cmp-src-name"><span class="dot" style="background:#2dd4bf"></span>CMA 中央气象台</div>
+    <div class="cmp-src-name"><span class="dot" style="background:#2dd4bf"></span>CMA ${T("cmpRef")}</div>
     <div class="cmp-pos">${cmaLast.lat.toFixed(1)}°, ${cmaLast.lon.toFixed(1)}°</div>
   </div>`;
   results.forEach((r) => {
@@ -886,17 +954,17 @@ function renderComparePanel(cmaTy, results) {
       rows += `<div class="cmp-source-row">
         <div class="cmp-src-name"><span class="dot" style="background:${r.src.color}"></span>${r.src.name[lang] || r.src.name.zh}${r.data.name ? " · " + r.data.name : ""}</div>
         <div class="cmp-pos">${last.lat.toFixed(1)}°, ${last.lon.toFixed(1)}°</div>
-        <div class="cmp-dev">偏差 ${dist.toFixed(0)} km</div>
+        <div class="cmp-dev">${T("cmpDev")} ${dist.toFixed(0)} km</div>
       </div>`;
-    } else if (r.status === "nokey") {
-      rows += `<div class="cmp-source-row"><div class="cmp-src-name"><span class="dot" style="background:${r.src.color}"></span>${r.src.name[lang] || r.src.name.zh}</div><div class="cmp-na">需配置 API Key</div></div>`;
     } else if (r.status === "empty") {
-      rows += `<div class="cmp-source-row"><div class="cmp-src-name"><span class="dot" style="background:${r.src.color}"></span>${r.src.name[lang] || r.src.name.zh}</div><div class="cmp-na">暂无该台风数据</div></div>`;
+      rows += `<div class="cmp-source-row"><div class="cmp-src-name"><span class="dot" style="background:${r.src.color}"></span>${r.src.name[lang] || r.src.name.zh}</div><div class="cmp-na">${T("cmpNoData")}</div></div>`;
     } else {
-      rows += `<div class="cmp-source-row"><div class="cmp-src-name"><span class="dot" style="background:${r.src.color}"></span>${r.src.name[lang] || r.src.name.zh}</div><div class="cmp-na">获取失败</div></div>`;
+      rows += `<div class="cmp-source-row"><div class="cmp-src-name"><span class="dot" style="background:${r.src.color}"></span>${r.src.name[lang] || r.src.name.zh}</div><div class="cmp-na">${T("cmpFail")}</div></div>`;
     }
   });
   document.getElementById("cmpRows").innerHTML = rows;
+  const title = document.getElementById("cmpTitle");
+  if (title) title.textContent = T("threePath");
 }
 
 // 两点间大圆距离(km)
