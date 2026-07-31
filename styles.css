@@ -120,6 +120,24 @@ html, body {
 .btn-refresh:hover { border-color: var(--accent); color: var(--accent); }
 .btn-refresh:active { transform: translateY(1px); }
 
+/* PWA 安装按钮 */
+.btn-install {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 14px;
+  font-size: 13px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all .2s;
+  white-space: nowrap;
+}
+.btn-install:hover { background: var(--accent); color: #0a1628; }
+.btn-install[hidden] { display: none !important; }
+
 /* ===== 预警横幅 ===== */
 .warning-banner {
   display: flex;
@@ -134,6 +152,8 @@ html, body {
 }
 .warning-banner.warn-orange { background: linear-gradient(90deg, rgba(230,126,34,0.18), rgba(230,126,34,0.06)); border-color: rgba(230,126,34,0.4); color: #ffe0bf; }
 .warning-banner.warn-yellow { background: linear-gradient(90deg, rgba(241,196,15,0.16), rgba(241,196,15,0.05)); border-color: rgba(241,196,15,0.4); color: #fdecb3; }
+/* 离线模式横幅 */
+.warning-banner.warn-offline { background: linear-gradient(90deg, rgba(93,173,226,0.18), rgba(93,173,226,0.06)); border-color: rgba(93,173,226,0.4); color: #a8d8ea; }
 .warn-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: #ff6b5e;
@@ -450,6 +470,7 @@ html, body {
 [data-theme="light"] .warning-banner { color: #8a2a20; }
 [data-theme="light"] .warning-banner.warn-orange { color: #8a4a10; }
 [data-theme="light"] .warning-banner.warn-yellow { color: #6b5400; }
+[data-theme="light"] .warning-banner.warn-offline { color: #1a6b8a; }
 
 /* 品牌标记浅色下微调发光 */
 [data-theme="light"] .brand-mark {

@@ -481,6 +481,7 @@ const state = {
   autoTimer: null,
   liveTimer: null,
   lang: "zh",
+  offline: false,
 };
 
 // ===== UI 元素 =====
@@ -1374,6 +1375,67 @@ document.getElementById("langSelect").addEventListener("change", (e) => {
   applyLang(lang);
   try { localStorage.setItem(LANG_KEY, lang); } catch (e2) {}
   refreshLangUI();
+});
+
+// ===== PWA：Service Worker + 离线 + 安装 =====
+let deferredInstall = null;
+
+function showOfflineBanner() {
+  el.warningBanner.hidden = false;
+  el.warningBanner.classList.remove("warn-orange", "warn-yellow");
+  el.warningBanner.classList.add("warn-offline");
+  el.warnText.textContent =
+    "离线模式 · 显示最近一次缓存的台风数据（网络恢复后自动刷新）";
+}
+function hideOfflineBanner() {
+  el.warningBanner.classList.remove("warn-offline");
+}
+
+// 注册 Service Worker
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./sw.js", { scope: "./" }).then(reg => {
+    console.log("[PWA] SW registered, scope:", reg.scope);
+    // SW 更新时提示用户
+    reg.addEventListener("updatefound", () => {
+      const sw = reg.installing;
+      if (sw) sw.addEventListener("statechange", () => {
+        if (sw.state === "activated") {
+          const msg = "新版本已就绪，请刷新页面";
+          try { console.log("[PWA]", msg); } catch (_) {}
+        }
+      });
+    });
+  }).catch(err => { console.warn("[PWA] SW register failed:", err); });
+
+  // 离线/在线检测
+  window.addEventListener("offline", () => {
+    state.offline = true;
+    showOfflineBanner();
+    stopAuto(); // 离线停止自动刷新
+  });
+  window.addEventListener("online", () => {
+    state.offline = false;
+    hideOfflineBanner();
+    startAuto(); // 恢复后重新加载最新数据
+    loadList(state.year);
+  });
+  // 页面加载时检测初始状态
+  if (!navigator.onLine) { state.offline = true; showOfflineBanner(); }
+}
+
+// 安装到桌面 / 主屏幕
+window.addEventListener("beforeinstallprompt", e => {
+  e.preventDefault();
+  deferredInstall = e;
+  document.getElementById("btnInstall").hidden = false;
+});
+document.getElementById("btnInstall").addEventListener("click", async () => {
+  if (!deferredInstall) return;
+  deferredInstall.prompt();
+  const result = await deferredInstall.userChoice;
+  deferredInstall = null;
+  document.getElementById("btnInstall").hidden = true;
+  console.log("[PWA] install:", result.outcome);
 });
 
 // ===== 启动 =====
