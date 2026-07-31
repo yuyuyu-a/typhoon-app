@@ -51,7 +51,7 @@ const I18N = {
     _label: "中文",
     title: "台风实况",
     subtitle: "实时路径 · 预报 · 风圈 · 历史",
-    dataSource: "数据：中央气象台 CMA · 日本气象厅 JMA · NASA EONET（公开免费）",
+    dataSource: "数据：中央气象台 CMA（主路径+预报）· 日本气象厅 JMA · NASA EONET（可选）",
     updated: "更新于",
     autoRefresh: "自动刷新",
     refresh: "刷新",
@@ -95,6 +95,8 @@ const I18N = {
     cmpNoData: "暂无该台风数据",
     cmpFail: "获取失败",
     cmpNetErr: "源不可达（网络限制）",
+    cmpNetErrTip: "该源服务器在国外或被网络防火墙拦截，国内部分网络环境无法直接访问。可尝试：①关闭代理/VPN后刷新 ②在代理例外中添加该域名",
+    chipFcUnit: "个点",
     chipFc: "预报",
     chipWind: "风圈",
   },
@@ -102,7 +104,7 @@ const I18N = {
     _label: "English",
     title: "Typhoon Live",
     subtitle: "Track · Forecast · Wind Circle · History",
-    dataSource: "Source: CMA · JMA · NASA EONET (free, public)",
+    dataSource: "Source: CMA (track+forecast) · JMA · NASA EONET (optional)",
     updated: "Updated",
     autoRefresh: "Auto-refresh",
     refresh: "Refresh",
@@ -145,7 +147,9 @@ const I18N = {
     cmpDev: "Dev",
     cmpNoData: "No data for this storm",
     cmpFail: "Fetch failed",
-    cmpNetErr: "Unreachable",
+    cmpNetErr: "Unreachable (network)",
+    cmpNetErrTip: "This source is hosted overseas and may be blocked by your network firewall. Try: ①Disable proxy/VPN and refresh ②Add domain to proxy exceptions",
+    chipFcUnit: " pts",
     chipFc: "Fcst",
     chipWind: "Wind",
   },
@@ -153,7 +157,7 @@ const I18N = {
     _label: "日本語",
     title: "台風実況",
     subtitle: "進路・予報・風域・履歴",
-    dataSource: "データ元：CMA · JMA · NASA EONET（無料公開）",
+    dataSource: "データ元：CMA（主経路+予報）· JMA · NASA EONET（任意）",
     updated: "更新",
     autoRefresh: "自動更新",
     refresh: "更新",
@@ -197,6 +201,8 @@ const I18N = {
     cmpNoData: "この台風のデータなし",
     cmpFail: "取得失敗",
     cmpNetErr: "到達不可（ネットワーク）",
+    cmpNetErrTip: "このソースは海外にホストされており、ネットワークファイアウォールでブロックされている可能性があります。①プロキシ/VPNをオフにしてリロード ②プロキシ例外にドメインを追加",
+    chipFcUnit: "点",
     chipFc: "予報",
     chipWind: "風域",
   },
@@ -767,6 +773,31 @@ function renderTyphoon(ty) {
 // 新增数据源只需往此数组里加一项, 渲染与对比面板会自动适配。
 const COMPARE_SOURCES = [
   {
+    id: "cma_fc",
+    name: { zh: "CMA 官方预报", en: "CMA Forecast", ja: "CMA 予報" },
+    color: "#f39c12", dash: "5 5", needKey: false, enabled: true, builtIn: true,
+    // CMA 自身预报数据: 从已加载的 cmaTy.forecast 中提取主预报机构(优先 CMA, 其次任一有数据的)
+    // 无需额外网络请求, 只要 CMA 主数据加载成功就一定可用
+    load(cmaTy) {
+      const agencies = Object.keys(cmaTy.forecast || {});
+      if (!agencies.length) return null;
+      // 优先取 CMA 自身预报, 其次取第一个有数据的机构
+      const ag = agencies.find((a) => /cma|中央/i.test(a)) || agencies[0];
+      const fc = cmaTy.forecast[ag];
+      if (!fc || !fc.length) return null;
+      return {
+        name: ag,
+        track: [],  // 预报源不画独立实况路径(避免与主路径重复)
+        forecast: fc.map((f) => ({
+          lat: f.lat, lon: f.lon, lead: f.lead, time: f.time,
+          grade: f.grade, wind: f.wind, pressure: f.pressure,
+        })),
+        // 标记这是纯预报源(用于面板特殊显示)
+        forecastOnly: true,
+      };
+    },
+  },
+  {
     id: "jma",
     name: { zh: "日本气象厅 JMA", en: "JMA (Japan)", ja: "気象庁 JMA" },
     color: "#9b59b6", dash: "8 4", needKey: false, enabled: true,
@@ -874,6 +905,37 @@ function antimeridianSegments(latlngs) {
 
 function drawCompareSource(src, data) {
   const layer = cmpLayer(src.id);
+
+  // 纯预报源(如 CMA 自身预报): 不画实况路径, 只从当前位置起画预报
+  if (data.forecastOnly && data.forecast && data.forecast.length) {
+    // 预报线: 从 CMA 最后一个实况点连到各预报点
+    const fcLatLngs = data.forecast.map((f) => [f.lat, f.lon]);
+    if (fcLatLngs.length > 0) {
+      // 画预报折线段
+      for (let i = 0; i < fcLatLngs.length - 1; i++) {
+        L.polyline([fcLatLngs[i], fcLatLngs[i + 1]], {
+          color: src.color, weight: 3, opacity: 0.85, dashArray: src.dash,
+        }).addTo(layer);
+      }
+      // 预报点标记
+      data.forecast.forEach((f) => {
+        const g = f.grade || gradeOf(f);
+        L.circleMarker([f.lat, f.lon], {
+          radius: 4.5, color: src.color, weight: 2,
+          fillColor: gradeInfo(g).color || bgStrokeColor(), fillOpacity: 1,
+        }).addTo(layer).bindPopup(
+          `<div class="popup-title">${srcName(src)}</div>` +
+          `<div class="popup-row">${t("forecast")} ${f.lead != null ? f.lead + "h" : ""}</div>` +
+          `<div class="popup-row">${f.lat.toFixed(1)}°, ${f.lon.toFixed(1)}°</div>` +
+          (f.wind ? `<div class="popup-row">${t("wind")}: <b>${f.wind.toFixed(1)} m/s</b></div>` : "") +
+          (f.pressure ? `<div class="popup-row">${t("pressure")}: <b>${f.pressure} hPa</b></div>` : "")
+        );
+      });
+    }
+    return;
+  }
+
+  // 常规源: 画实况路径 + 预报
   const latlngs = data.track.map((p) => [p.lat, p.lon]);
   if (latlngs.length > 1) {
     antimeridianSegments(latlngs).forEach((seg) => {
@@ -958,17 +1020,28 @@ function renderComparePanel(cmaTy, results) {
   </div>`;
   results.forEach((r) => {
     if (r.status === "ok") {
-      const last = r.data.track[r.data.track.length - 1];
-      const dist = haversine(cmaLast.lat, cmaLast.lon, last.lat, last.lon);
-      rows += `<div class="cmp-source-row">
-        <div class="cmp-src-name"><span class="dot" style="background:${r.src.color}"></span>${r.src.name[lang] || r.src.name.zh}${r.data.name ? " · " + r.data.name : ""}</div>
-        <div class="cmp-pos">${last.lat.toFixed(1)}°, ${last.lon.toFixed(1)}°</div>
-        <div class="cmp-dev">${T("cmpDev")} ${dist.toFixed(0)} km</div>
-      </div>`;
+      if (r.data.forecastOnly) {
+        // 纯预报源: 显示预报点数和末点位置
+        const fcLast = r.data.forecast[r.data.forecast.length - 1];
+        const dist = haversine(cmaLast.lat, cmaLast.lon, fcLast.lat, fcLast.lon);
+        rows += `<div class="cmp-source-row">
+          <div class="cmp-src-name"><span class="dot" style="background:${r.src.color}"></span>${r.src.name[lang] || r.src.name.zh}${r.data.name ? " · " + r.data.name : ""}</div>
+          <div class="cmp-pos">${T("chipFc")} ${r.data.forecast.length}${T("chipFcUnit") || "pt"} · 末点 ${fcLast.lat.toFixed(1)}°, ${fcLast.lon.toFixed(1)}°</div>
+          <div class="cmp-dev">${T("cmpDev")} ${dist.toFixed(0)} km</div>
+        </div>`;
+      } else {
+        const last = r.data.track[r.data.track.length - 1];
+        const dist = haversine(cmaLast.lat, cmaLast.lon, last.lat, last.lon);
+        rows += `<div class="cmp-source-row">
+          <div class="cmp-src-name"><span class="dot" style="background:${r.src.color}"></span>${r.src.name[lang] || r.src.name.zh}${r.data.name ? " · " + r.data.name : ""}</div>
+          <div class="cmp-pos">${last.lat.toFixed(1)}°, ${last.lon.toFixed(1)}°</div>
+          <div class="cmp-dev">${T("cmpDev")} ${dist.toFixed(0)} km</div>
+        </div>`;
+      }
     } else if (r.status === "empty") {
       rows += `<div class="cmp-source-row"><div class="cmp-src-name"><span class="dot" style="background:${r.src.color}"></span>${r.src.name[lang] || r.src.name.zh}</div><div class="cmp-na">${T("cmpNoData")}</div></div>`;
     } else if (r.status === "neterr") {
-      rows += `<div class="cmp-source-row"><div class="cmp-src-name"><span class="dot" style="background:${r.src.color}"></span>${r.src.name[lang] || r.src.name.zh}</div><div class="cmp-na">${T("cmpNetErr") || "源不可达"}</div></div>`;
+      rows += `<div class="cmp-source-row"><div class="cmp-src-name"><span class="dot" style="background:${r.src.color}"></span>${r.src.name[lang] || r.src.name.zh}</div><div class="cmp-na" title="${T("cmpNetErrTip") || ""}">${T("cmpNetErr") || "源不可达"}</div></div>`;
     } else {
       rows += `<div class="cmp-source-row"><div class="cmp-src-name"><span class="dot" style="background:${r.src.color}"></span>${r.src.name[lang] || r.src.name.zh}</div><div class="cmp-na">${T("cmpFail")}</div></div>`;
     }
@@ -987,10 +1060,11 @@ function haversine(lat1, lon1, lat2, lon2) {
 }
 
 // ===== 数据源 (浏览器直连, 无需后端代理) =====
-// CMA 中央气象台: HTTPS + 开放 CORS, 返回 JSONP 包裹(需剥离外壳)
-// JMA 日本气象厅: HTTPS + 开放 CORS, 返回纯 JSON
-// NASA EONET: HTTPS + 开放 CORS, 公开免费、免 Key, 提供全球热带气旋逐点轨迹
-// 三者均可在国内浏览器直接访问, 因此整个站点可纯静态部署、永久可达、无需梯子
+// CMA 中央气象台: HTTPS + 开放 CORS, 返回 JSONP 包裹(需剥离外壳); 主路径 + 内置预报对比源
+// JMA 日本气象厅: HTTPS + 开放 CORS, 返回纯 JSON; 部分国内网络可能不可达(国外站点)
+// NASA EONET: HTTPS + 开放 CORS, 公开免费、免 Key, 全球热带气旋轨迹; 部分国内网络可能不可达
+// CMA 官方预报为内置源(无需额外网络请求), JMA/EONET 为外部可选源(网络通畅时自动加载)
+// 整个站点可纯静态部署、永久可达、无需梯子
 const CMA_BASE = "https://typhoon.nmc.cn/weatherservice/typhoon/jsons";
 const JMA_BASE = "https://www.jma.go.jp/bosai/typhoon";
 
