@@ -63,6 +63,7 @@ const I18N = {
     live: "活跃",
     stopped: "已停",
     stopped2: "已停止",
+    replay: "回放",
     yearSuffix: " 年",
     legendTitle: "强度等级",
     windTitle: "风圈",
@@ -116,6 +117,7 @@ const I18N = {
     live: "Active",
     stopped: "Ended",
     stopped2: "Stopped",
+    replay: "Replay",
     yearSuffix: "",
     legendTitle: "Intensity Scale",
     windTitle: "Wind Circle",
@@ -169,6 +171,7 @@ const I18N = {
     live: "活動中",
     stopped: "終了",
     stopped2: "終了",
+    replay: "再生",
     yearSuffix: "年",
     legendTitle: "強度階級",
     windTitle: "風域",
@@ -482,6 +485,7 @@ const state = {
   liveTimer: null,
   lang: "zh",
   offline: false,
+  replay: { active: false, index: 0, playing: false, timer: null, speed: 1 },
 };
 
 // ===== UI 元素 =====
@@ -499,6 +503,12 @@ const el = {
   autoToggle: document.getElementById("autoToggle"),
   btnRefresh: document.getElementById("btnRefresh"),
   legendRows: document.getElementById("legendRows"),
+  timeline: document.getElementById("timeline"),
+  tlPlay: document.getElementById("tlPlay"),
+  tlRange: document.getElementById("tlRange"),
+  tlTime: document.getElementById("tlTime"),
+  tlSpeed: document.getElementById("tlSpeed"),
+  tlLive: document.getElementById("tlLive"),
 };
 
 // ===== 图例 =====
@@ -598,6 +608,7 @@ async function selectTyphoon(id, opts = {}) {
     if (!ty) throw new Error("empty");
     state.currentTyphoon = ty;
     renderTyphoon(ty);
+    initTimeline(ty);
   } catch (e) {
     el.loader.hidden = true;
   }
@@ -659,6 +670,7 @@ function updateLiveEstimate(ty) {
 }
 // 每 3 秒平滑移动估算标记 (不重建, 动画不中断)
 function tickLiveEstimate() {
+  if (state.replay.active) return; // 回放时不移动实时估算标记
   if (!state.currentTyphoon || state.currentTyphoon.state !== "start") return;
   const est = estimateCurrent(state.currentTyphoon);
   if (!est) return;
@@ -672,19 +684,23 @@ function startLiveTick() {
   state.liveTimer = setInterval(tickLiveEstimate, 3000);
 }
 
-function renderTyphoon(ty) {
+function renderTyphoon(ty, curIndex) {
   clearLayers();
+  layers.live.clearLayers(); // 回放时清掉实时估算标记
   if (!ty || !ty.points || !ty.points.length) {
     el.loader.hidden = true;
     return;
   }
   const pts = ty.points;
-  const last = pts[pts.length - 1];
-  const lastGrade = gradeOf(last);
+  const n = pts.length;
+  const cur = (curIndex == null) ? n - 1 : Math.min(Math.max(0, curIndex | 0), n - 1);
+  const atEnd = cur === n - 1;
   const live = ty.state === "start";
+  const head = pts[cur];
+  const lastGrade = gradeOf(head);
 
-  // --- 历史路径: 分段按强度着色 ---
-  for (let i = 0; i < pts.length - 1; i++) {
+  // --- 历史路径: 分段按强度着色 (只画到 cur) ---
+  for (let i = 0; i < cur; i++) {
     const g = gradeOf(pts[i]);
     const color = gradeInfo(g).color;
     L.polyline(
@@ -693,77 +709,78 @@ function renderTyphoon(ty) {
     ).addTo(layers.track);
   }
 
-  // --- 路径点标记 + 弹窗 ---
+  // --- 路径点标记 + 弹窗 (只画到 cur) ---
   pts.forEach((p, i) => {
+    if (i > cur) return;
     const g = gradeOf(p);
-    const isLast = i === pts.length - 1;
+    const isHead = i === cur;
     const color = gradeInfo(g).color;
-    if (live && isLast) {
-      // 官方最新定位点 (静态白色高亮), 实时估算点由 updateLiveEstimate 绘制
+    if (isHead) {
+      // 回放头: 醒目青环 (不论是否最新点)
       L.circleMarker([p.lat, p.lon], {
-        radius: 6, color: "#ffffff", weight: 2,
+        radius: 6, color: "#00e5ff", weight: 2.5,
         fillColor: color, fillOpacity: 1,
-      }).addTo(layers.marker).bindPopup(popupHtml(p, ty, true));
+      }).addTo(layers.marker).bindPopup(popupHtml(p, ty, false));
     } else {
       L.circleMarker([p.lat, p.lon], {
-        radius: isLast ? 5 : 3.5,
-        color: bgStrokeColor(),
-        weight: 1,
-        fillColor: color,
-        fillOpacity: 1,
+        radius: 3.5, color: bgStrokeColor(), weight: 1,
+        fillColor: color, fillOpacity: 1,
       }).addTo(layers.marker).bindPopup(popupHtml(p, ty, false));
     }
   });
 
-  // --- 预报路径 (虚线, 按预报强度着色) ---
-  const agencies = Object.keys(ty.forecast || {});
-  agencies.forEach((ag) => {
-    const fc = ty.forecast[ag];
-    if (!fc || !fc.length) return;
-    const pathPts = [{ lat: last.lat, lon: last.lon, grade: lastGrade, wind: last.wind, time: last.time, lead: 0 }];
-    fc.forEach((f) => pathPts.push(f));
-    for (let i = 0; i < pathPts.length - 1; i++) {
-      const a = pathPts[i], b = pathPts[i + 1];
-      const g = gradeOf(b);
-      L.polyline(
-        [[a.lat, a.lon], [b.lat, b.lon]],
-        { color: gradeInfo(g).color, weight: 2, opacity: 0.8, dashArray: "5 5" }
-      ).addTo(layers.forecast);
-    }
-    // 预报点标记 (空心)
-    fc.forEach((f) => {
-      const g = gradeOf(f);
-      L.circleMarker([f.lat, f.lon], {
-        radius: 3,
-        color: gradeInfo(g).color,
-        weight: 1.5,
-        fillColor: bgStrokeColor(),
-        fillOpacity: 1,
-      })
-        .addTo(layers.forecast)
-        .bindPopup(forecastPopupHtml(f, ag, ty));
+  // --- 预报路径 (虚线, 仅最新点 atEnd 时绘制) ---
+  if (atEnd) {
+    const agencies = Object.keys(ty.forecast || {});
+    agencies.forEach((ag) => {
+      const fc = ty.forecast[ag];
+      if (!fc || !fc.length) return;
+      const pathPts = [{ lat: head.lat, lon: head.lon, grade: lastGrade, wind: head.wind, time: head.time, lead: 0 }];
+      fc.forEach((f) => pathPts.push(f));
+      for (let i = 0; i < pathPts.length - 1; i++) {
+        const a = pathPts[i], b = pathPts[i + 1];
+        const g = gradeOf(b);
+        L.polyline(
+          [[a.lat, a.lon], [b.lat, b.lon]],
+          { color: gradeInfo(g).color, weight: 2, opacity: 0.8, dashArray: "5 5" }
+        ).addTo(layers.forecast);
+      }
+      // 预报点标记 (空心)
+      fc.forEach((f) => {
+        const g = gradeOf(f);
+        L.circleMarker([f.lat, f.lon], {
+          radius: 3,
+          color: gradeInfo(g).color,
+          weight: 1.5,
+          fillColor: bgStrokeColor(),
+          fillOpacity: 1,
+        })
+          .addTo(layers.forecast)
+          .bindPopup(forecastPopupHtml(f, ag, ty));
+      });
     });
-  });
+  }
 
-  // --- 风圈 (当前位置的四象限) ---
-  renderWindCircles(last);
+  // --- 风圈 (回放头位置的四象限) ---
+  renderWindCircles(head);
 
   // --- 详情卡 + 预警 ---
-  updateDetailCard(last, ty);
-  updateWarning(last, ty, live);
+  updateDetailCard(head, ty, state.replay.active);
+  updateWarning(head, ty, live && atEnd);
 
-  // --- 视图适配 ---
+  // --- 视图适配 (仅首次) ---
   if (state.fitOnRender) {
-    const all = [[last.lat, last.lon]];
-    pts.forEach((p) => all.push([p.lat, p.lon]));
-    agencies.forEach((ag) => (ty.forecast[ag] || []).forEach((f) => all.push([f.lat, f.lon])));
+    const all = [[head.lat, head.lon]];
+    pts.forEach((p, i) => { if (i <= cur) all.push([p.lat, p.lon]); });
+    if (atEnd) Object.keys(ty.forecast || {}).forEach((ag) => (ty.forecast[ag] || []).forEach((f) => all.push([f.lat, f.lon])));
     map.fitBounds(L.latLngBounds(all), { padding: [40, 40], maxZoom: 7 });
   }
 
-  // --- 多源对比: 异步加载 JMA / NASA EONET 等同台风路径 ---
-  loadCompareSources(ty);
-  // --- 实时估算位置 (两报之间持续外推) ---
-  updateLiveEstimate(ty);
+  // --- 多源对比 + 实时估算: 仅在最新点且非回放时 ---
+  if (atEnd && !state.replay.active) {
+    loadCompareSources(ty);
+    updateLiveEstimate(ty);
+  }
 
   el.loader.hidden = true;
 }
@@ -1271,7 +1288,7 @@ function forecastPopupHtml(f, agency, ty) {
 }
 
 // ===== 详情卡 =====
-function updateDetailCard(p, ty) {
+function updateDetailCard(p, ty, isReplay) {
   el.detailCard.hidden = false;
   const g = gradeOf(p);
   const info = gradeInfo(g);
@@ -1279,8 +1296,13 @@ function updateDetailCard(p, ty) {
   document.getElementById("dcName").textContent = tyName(ty);
   const st = document.getElementById("dcState");
   const live = ty.state === "start";
-  st.textContent = live ? t("live") : t("stopped2");
-  st.className = `dc-state ${live ? "live" : "done"}`;
+  if (isReplay) {
+    st.textContent = t("replay");
+    st.className = "dc-state replay";
+  } else {
+    st.textContent = live ? t("live") : t("stopped2");
+    st.className = `dc-state ${live ? "live" : "done"}`;
+  }
   document.getElementById("dcGrade").innerHTML =
     `<span style="color:${info.color}">●</span> ${info.name}`;
   document.getElementById("dcPos").textContent = `${p.lat.toFixed(1)}°${t("north")}, ${p.lon.toFixed(1)}°${t("east")}`;
@@ -1288,7 +1310,7 @@ function updateDetailCard(p, ty) {
   document.getElementById("dcWind").textContent = `${p.wind} m/s`;
   document.getElementById("dcMoveDir").textContent = dirCn(p.moveDir);
   document.getElementById("dcMoveSpeed").textContent = `${p.moveSpeed} km/h`;
-  document.getElementById("dcTime").textContent = `${t("latestPos")} · ${fmtTime(p.time)}`;
+  document.getElementById("dcTime").textContent = (isReplay ? "" : `${t("latestPos")} · `) + fmtTime(p.time);
   // 字段名标签
   document.getElementById("lblGrade").textContent = t("level");
   document.getElementById("lblPos").textContent = t("position");
@@ -1338,6 +1360,7 @@ function startAuto() {
       el.updated.textContent = `${t("updated")} ${new Date().toLocaleTimeString("zh-CN")}`;
     } catch (e) {}
     if (state.currentTyphoon && state.currentTyphoon.state === "start" && state.selectedId) {
+      if (state.replay.active) return; // 回放中不打断
       // 静默刷新详情 (不重置视图)
       try {
         const d2 = await cmaFetch(cmaViewUrl(state.selectedId), TTL_DETAIL);
@@ -1346,6 +1369,7 @@ function startAuto() {
         state.currentTyphoon = ty;
         state.fitOnRender = false;
         renderTyphoon(ty);
+        initTimeline(ty); // 同步时间轴上限 (可能有新定位点)
       } catch (e) {}
     }
   }, 30000); // 每 30 秒刷新列表/活跃台风; 详情走 30 秒 TTL 缓存, 官方一发布即上图
@@ -1354,6 +1378,97 @@ function stopAuto() {
   if (state.autoTimer) clearInterval(state.autoTimer);
   state.autoTimer = null;
 }
+
+// ===== 历史台风回放时间轴 =====
+const REPLAY_STEP_MS = 500; // 每帧基准间隔(ms), 受 speed 调整
+
+function initTimeline(ty) {
+  const n = (ty && ty.points) ? ty.points.length : 0;
+  stopReplay();
+  if (n < 2) {
+    state.replay.active = false;
+    el.timeline.hidden = true;
+    return;
+  }
+  el.timeline.hidden = false;
+  state.replay.active = false;
+  state.replay.index = n - 1;
+  el.tlRange.min = 0;
+  el.tlRange.max = n - 1;
+  el.tlRange.value = n - 1;
+  el.tlTime.textContent = fmtTime(ty.points[n - 1].time);
+  el.tlPlay.textContent = "▶";
+}
+
+function applyReplayFrame() {
+  if (!state.currentTyphoon) return;
+  const n = state.currentTyphoon.points.length;
+  const idx = Math.min(Math.max(0, state.replay.index | 0), n - 1);
+  state.replay.index = idx;
+  el.tlRange.value = idx;
+  const p = state.currentTyphoon.points[idx];
+  el.tlTime.textContent = fmtTime(p.time);
+  renderTyphoon(state.currentTyphoon, idx);
+}
+
+function startReplay() {
+  if (state.replay.playing) return;
+  const n = state.currentTyphoon ? state.currentTyphoon.points.length : 0;
+  if (n < 2) return;
+  if (state.replay.index >= n - 1) state.replay.index = 0; // 从开头重播
+  state.replay.active = true;
+  state.replay.playing = true;
+  el.tlPlay.textContent = "⏸";
+  const interval = Math.max(80, REPLAY_STEP_MS / state.replay.speed);
+  state.replay.timer = setInterval(() => {
+    const nn = state.currentTyphoon.points.length;
+    if (state.replay.index >= nn - 1) { stopReplay(); return; }
+    state.replay.index++;
+    applyReplayFrame();
+  }, interval);
+}
+
+function stopReplay() {
+  state.replay.playing = false;
+  if (state.replay.timer) clearInterval(state.replay.timer);
+  state.replay.timer = null;
+  if (el.tlPlay) el.tlPlay.textContent = "▶";
+}
+
+// 时间轴事件
+el.tlRange.addEventListener("input", (e) => {
+  if (!state.currentTyphoon) return;
+  stopReplay();
+  const idx = Number(e.target.value);
+  const n = state.currentTyphoon.points.length;
+  state.replay.index = idx;
+  if (idx >= n - 1) {
+    state.replay.active = false;
+    renderTyphoon(state.currentTyphoon); // 拖到末端 → 回到最新实况
+  } else {
+    state.replay.active = true;
+    applyReplayFrame();
+  }
+});
+el.tlPlay.addEventListener("click", () => {
+  if (!state.currentTyphoon) return;
+  if (state.replay.playing) stopReplay();
+  else startReplay();
+});
+el.tlSpeed.addEventListener("change", (e) => {
+  state.replay.speed = Number(e.target.value) || 1;
+  if (state.replay.playing) { stopReplay(); startReplay(); }
+});
+el.tlLive.addEventListener("click", () => {
+  if (!state.currentTyphoon) return;
+  stopReplay();
+  state.replay.active = false;
+  state.replay.index = state.currentTyphoon.points.length - 1;
+  el.tlRange.value = state.replay.index;
+  const last = state.currentTyphoon.points[state.replay.index];
+  el.tlTime.textContent = fmtTime(last.time);
+  renderTyphoon(state.currentTyphoon); // 回到最新, 恢复实时估算与对比
+});
 
 // ===== 事件绑定 =====
 el.yearSelect.addEventListener("change", (e) => loadList(Number(e.target.value)));

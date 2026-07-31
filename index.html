@@ -106,6 +106,19 @@
         </div>
       </div>
 
+      <div class="timeline" id="timeline" hidden>
+        <button class="tl-btn tl-play" id="tlPlay" title="播放 / 暂停">▶</button>
+        <input type="range" class="tl-range" id="tlRange" min="0" max="0" value="0" />
+        <span class="tl-time" id="tlTime">—</span>
+        <select class="tl-speed" id="tlSpeed" title="播放速度">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+          <option value="4">4×</option>
+        </select>
+        <button class="tl-btn tl-live" id="tlLive" title="跳到最新实况">实时</button>
+      </div>
+
       <div class="loader" id="loader" hidden><span class="spinner"></span> <span id="loaderText">加载台风数据…</span></div>
     </section>
   </main>

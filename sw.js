@@ -8,7 +8,7 @@
  *   ⑤ 跨域非上述                         → 不拦截，直接放行
  */
 
-const VERSION = "typhoon-v2";
+const VERSION = "typhoon-v3";
 
 /* ===== 应用外壳（install 预缓存） ===== */
 const SHELL = [
