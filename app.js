@@ -86,7 +86,7 @@ const I18N = {
     warningTail: "中心附近最大风力",
     warningTip: "请相关海域注意防范。",
     loadTip: "加载台风数据…",
-    mapAttr: "地图底图 © OpenStreetMap 贡献者 · 台风数据 © 中央气象台",
+    mapAttr: "地图底图 © 高德地图 (AutoNavi) · 台风数据 © 中央气象台",
     north: "北纬",
     east: "东经",
     threePath: "三条路径对比",
@@ -137,7 +137,7 @@ const I18N = {
     warningTail: "Max wind near center",
     warningTip: "Relevant sea areas, please take precautions.",
     loadTip: "Loading typhoon data…",
-    mapAttr: "Map © OpenStreetMap contributors · Typhoon data © CMA",
+    mapAttr: "Map © AutoNavi (Gaode) · Typhoon data © CMA",
     north: "N",
     east: "E",
     threePath: "3-Path Comparison",
@@ -188,7 +188,7 @@ const I18N = {
     warningTail: "中心付近の最大風力",
     warningTip: "該当海域は警戒してください。",
     loadTip: "台風データを読み込み中…",
-    mapAttr: "地図 © OpenStreetMap 貢献者 · 台風データ © 中央気象台",
+    mapAttr: "地図 © 高徳地図 (AutoNavi) · 台風データ © 中央気象台",
     north: "北緯",
     east: "東経",
     threePath: "3経路比較",
@@ -342,9 +342,10 @@ const map = L.map("map", {
   worldCopyJump: true,
 }).setView([20, 140], 4);
 
-// ===== 底图系统: OSM 标准底图 (中国区域中文地名) + 自建多语言地名标注层 =====
-// OSM 在中国区由本地贡献者用中文标注, 与之前预览效果一致; 通过 CSS 滤镜调暗适配深色主题
-// 自建三语地名标注层在 OSM 之上, 切语言时跟着切换
+// ===== 底图系统: 高德地图瓦片 (国内直连, GCJ-02 坐标) + 自建三语地名标注层 =====
+// OSM / CartoDB 等境外瓦片源在中国大陆被墙, 故改用高德 (wprd0{1-4}.is.autonavi.com, 免 key, HTTP 200)。
+// 高德瓦片为 GCJ-02 偏移坐标, 因此所有台风数据在归一化时统一 WGS-84→GCJ-02 转换, 保证与底图对齐。
+// 自建三语地名标注层同样做 GCJ-02 转换, 切语言时跟着切换。
 let baseLayer = null;
 let labelLayer = null;
 
@@ -352,10 +353,10 @@ function makeBaseLayer() {
   const theme = document.documentElement.getAttribute("data-theme") || "dark";
   const tileClass = theme === "light" ? "tiles-light" : "tiles-dark";
   const layer = L.tileLayer(
-    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    "https://wprd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scl=1&style=7&x={x}&y={y}&z={z}",
     {
       attribution: "",
-      subdomains: "abc",
+      subdomains: "1234",
       maxZoom: 18,
       className: tileClass,
     }
@@ -389,13 +390,14 @@ function renderPlaceLabels() {
   if (!window.PLACE_LABELS) return;
   window.PLACE_LABELS.forEach((p) => {
     const name = p[lang] || p.zh;
+    const [gLat, gLon] = wgs84ToGcj02(p.lat, p.lon);
     const icon = L.divIcon({
       className: "place-label",
       html: `<span class="pl pl-${p.type}">${name}</span>`,
       iconSize: [0, 0],
       iconAnchor: [0, 0],
     });
-    L.marker([p.lat, p.lon], { icon, interactive: false, keyboard: false }).addTo(labelLayer);
+    L.marker([gLat, gLon], { icon, interactive: false, keyboard: false }).addTo(labelLayer);
   });
   labelLayer.addTo(map);
 }
@@ -803,7 +805,8 @@ const COMPARE_SOURCES = [
             wind: mag != null ? mag * 0.514444 : null, // knots → m/s, 与 CMA/JMA 一致
           };
         })
-        .sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
+        .sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0))
+        .map(toGcj);
       if (!pts.length) return null;
       return { name: ev.title || "", track: pts, forecast: [] };
     },
@@ -1041,6 +1044,47 @@ function cmaViewUrl(id) {
   return `${CMA_BASE}/view_${id}?t=${Date.now()}&callback=cma_view_${id}`;
 }
 
+// ===== 坐标转换: WGS-84 → GCJ-02 (高德/腾讯瓦片采用 GCJ-02 偏移坐标) =====
+// 标准国测局加密算法; 境外坐标原样返回。用于把台风 WGS-84 数据对齐到高德底图。
+const GCJ_A = 6378245.0;
+const GCJ_EE = 0.00669342162296594323;
+function _gcjOutChina(lat, lon) {
+  return !(lon > 73.66 && lon < 135.05 && lat > 3.86 && lat < 53.55);
+}
+function _gcjTlat(x, y) {
+  let r = -100 + 2 * x + 3 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+  r += ((20 * Math.sin(6 * x * Math.PI) + 20 * Math.sin(2 * x * Math.PI)) * 2) / 3;
+  r += ((20 * Math.sin(y * Math.PI) + 40 * Math.sin((y / 3) * Math.PI)) * 2) / 3;
+  r += ((160 * Math.sin((y / 12) * Math.PI) + 320 * Math.sin((y / 30) * Math.PI)) * 2) / 3;
+  return r;
+}
+function _gcjTlon(x, y) {
+  let r = 300 + x + 2 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+  r += ((20 * Math.sin(6 * x * Math.PI) + 20 * Math.sin(2 * x * Math.PI)) * 2) / 3;
+  r += ((20 * Math.sin(x * Math.PI) + 40 * Math.sin((x / 3) * Math.PI)) * 2) / 3;
+  r += ((150 * Math.sin((x / 12) * Math.PI) + 300 * Math.sin((x / 30) * Math.PI)) * 2) / 3;
+  return r;
+}
+function wgs84ToGcj02(lat, lon) {
+  if (_gcjOutChina(lat, lon)) return [lat, lon];
+  let dLat = _gcjTlat(lon - 105, lat - 35);
+  let dLon = _gcjTlon(lon - 105, lat - 35);
+  const radLat = (lat / 180) * Math.PI;
+  let magic = Math.sin(radLat);
+  magic = 1 - GCJ_EE * magic * magic;
+  const sqrtMagic = Math.sqrt(magic);
+  dLat = (dLat * 180) / ((GCJ_A * (1 - GCJ_EE)) / sqrtMagic * Math.PI);
+  dLon = (dLon * 180) / (GCJ_A / sqrtMagic * Math.cos(radLat) * Math.PI);
+  return [lat + dLat, lon + dLon];
+}
+// 将含 {lat, lon} 的点原地转换为 GCJ-02, 返回该点 (便于链式 map)
+function toGcj(p) {
+  if (!p || p.lat == null || p.lon == null) return p;
+  const [la, lo] = wgs84ToGcj02(p.lat, p.lon);
+  p.lat = la; p.lon = lo;
+  return p;
+}
+
 // 归一化函数 (移植自原 Node 代理服务端)
 function normalizeList(data) {
   const list = (data && data.typhoonList) || [];
@@ -1057,14 +1101,14 @@ function normalizeTyphoon(data) {
     pressure: p[6], wind: p[7], moveDir: p[8], moveSpeed: p[9],
     radii: (p[10] || []).map((r) => ({ knot: r[0], ne: r[1], se: r[2], sw: r[3], nw: r[4] })),
     forecast: p[11] || {},
-  }));
+  })).map(toGcj);
   let latestForecast = {};
   if (points.length) {
     const fc = points[points.length - 1].forecast || {};
     for (const [agency, arr] of Object.entries(fc)) {
       latestForecast[agency] = (arr || []).map((f) => ({
         lead: f[0], time: f[1], lon: f[2], lat: f[3], pressure: f[4], wind: f[5], grade: f[7],
-      }));
+      })).map(toGcj);
     }
   }
   return {
@@ -1093,7 +1137,8 @@ function normalizeJmaTyphoon(data) {
   return {
     source: "JMA", typhoonNumber: title.typhoonNumber,
     name_jp: title.name && title.name.jp, name_en: title.name && title.name.en,
-    issue: title.issue && title.issue.UTC, track: trackPts, forecast: forecastPts,
+    issue: title.issue && title.issue.UTC,
+    track: trackPts.map(toGcj), forecast: forecastPts.map(toGcj),
   };
 }
 
